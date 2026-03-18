@@ -33,25 +33,14 @@ ALLOWED_BLOCK_TYPES: List[str] = [
     "paragraph",
     "list",
     "table",
-    "swotTable",
-    "pestTable",
     "blockquote",
-    "engineQuote",
     "hr",
     "code",
     "math",
-    "figure",
     "callout",
-    "kpiGrid",
     "widget",
     "toc",
 ]
-
-ENGINE_AGENT_TITLES: Dict[str, str] = {
-    "insight": "Insight Agent",
-    "media": "Media Agent",
-    "query": "Query Agent",
-}
 
 # ====== Schema定义 ======
 inline_mark_schema: Dict[str, Any] = {
@@ -317,36 +306,6 @@ blockquote_block: Dict[str, Any] = {
     "additionalProperties": True,
 }
 
-engine_quote_block: Dict[str, Any] = {
-    "title": "EngineQuoteBlock",
-    "type": "object",
-    "properties": {
-        "type": {"const": "engineQuote"},
-        "engine": {"type": "string", "enum": ["insight", "media", "query"]},
-        "title": {"type": "string"},
-        "blocks": {
-            "type": "array",
-            "items": {"$ref": "#/definitions/block"},
-        },
-    },
-    "required": ["type", "engine", "blocks", "title"],
-    "allOf": [
-        {
-            "if": {"properties": {"engine": {"const": "insight"}}},
-            "then": {"properties": {"title": {"const": ENGINE_AGENT_TITLES["insight"]}}},
-        },
-        {
-            "if": {"properties": {"engine": {"const": "media"}}},
-            "then": {"properties": {"title": {"const": ENGINE_AGENT_TITLES["media"]}}},
-        },
-        {
-            "if": {"properties": {"engine": {"const": "query"}}},
-            "then": {"properties": {"title": {"const": ENGINE_AGENT_TITLES["query"]}}},
-        },
-    ],
-    "additionalProperties": True,
-}
-
 hr_block: Dict[str, Any] = {
     "title": "HorizontalRuleBlock",
     "type": "object",
@@ -459,11 +418,12 @@ widget_block: Dict[str, Any] = {
         "type": {"const": "widget"},
         "widgetId": {"type": "string"},
         "widgetType": {"type": "string"},
+        "url": {"type": "string", "format": "uri-reference"},
         "props": {"type": "object"},
         "data": {"type": "object"},
         "dataRef": {"type": "string"},
     },
-    "required": ["type", "widgetId", "widgetType"],
+    "required": ["type", "widgetId", "widgetType", "url"],
     "additionalProperties": True,
 }
 
@@ -485,17 +445,12 @@ block_variants: List[Dict[str, Any]] = [
     list_block,
     table_block,
     blockquote_block,
-    engine_quote_block,
     hr_block,
     code_block,
     math_block,
-    figure_block,
     callout_block,
-    kpi_block,
     widget_block,
     toc_block,
-    swot_block,
-    pest_block,
 ]
 
 CHAPTER_JSON_SCHEMA: Dict[str, Any] = {
@@ -541,5 +496,4 @@ __all__ = [
     "ALLOWED_BLOCK_TYPES",
     "CHAPTER_JSON_SCHEMA",
     "CHAPTER_JSON_SCHEMA_TEXT",
-    "ENGINE_AGENT_TITLES",
 ]

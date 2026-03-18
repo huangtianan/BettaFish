@@ -286,10 +286,17 @@ def generate_report(reports: list[str], query: str, pdf_available: bool) -> Dict
 
         # 生成报告
         logger.info("开始生成报告，这可能需要几分钟时间...")
+        inputs = []
+        for engine, content in zip(latest_files.keys(), reports):
+            inputs.append({
+                "outputType": "text",
+                "query": f"{engine}_analysis",
+                "content": content,
+                "url": "",
+            })
         result = agent.generate_report(
             query=query,
-            reports=reports,
-            forum_logs="",  # 不使用论坛日志
+            inputs=inputs,
             custom_template="",  # 使用自动模板选择
             save_report=True,  # 自动保存报告
             stream_handler=stream_handler

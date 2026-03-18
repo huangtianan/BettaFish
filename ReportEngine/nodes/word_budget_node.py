@@ -39,8 +39,7 @@ class WordBudgetNode(BaseNode):
         self,
         sections: List[TemplateSection],
         design: Dict[str, Any],
-        reports: Dict[str, str],
-        forum_logs: str,
+        dataset: Dict[str, Any],
         query: str,
         template_overview: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
@@ -50,8 +49,7 @@ class WordBudgetNode(BaseNode):
         参数:
             sections: 模板章节列表。
             design: 布局节点返回的设计稿（title/toc/hero等）。
-            reports: 三引擎报告映射。
-            forum_logs: 论坛日志原文。
+            dataset: 结构化输入数据集（含 items/by_type/text_context）。
             query: 用户查询词。
             template_overview: 可选的模板概览，含章节元信息。
 
@@ -68,8 +66,7 @@ class WordBudgetNode(BaseNode):
                 "title": sections[0].title if sections else "",
                 "chapters": [section.to_dict() for section in sections],
             },
-            "reports": reports,
-            "forumLogs": forum_logs,
+            "dataset": dataset,
         }
         user = build_word_budget_prompt(payload)
         response = self.llm_client.stream_invoke_to_string(
