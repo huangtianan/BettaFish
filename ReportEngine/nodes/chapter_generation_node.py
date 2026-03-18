@@ -19,7 +19,6 @@ from ..core import TemplateSection, ChapterStorage
 from ..ir import (
     ALLOWED_BLOCK_TYPES,
     ALLOWED_INLINE_MARKS,
-    ENGINE_AGENT_TITLES,
     IRValidator,
 )
 from ..prompts import (
@@ -1315,11 +1314,9 @@ class ChapterGenerationNode(BaseNode):
     def _sanitize_engine_quote_block(self, block: Dict[str, Any]):
         """engineQuote仅用于单Agent发言，内部仅允许paragraph且title需锁定Agent名称"""
         engine_raw = block.get("engine")
-        engine = engine_raw.lower() if isinstance(engine_raw, str) else None
-        if engine not in ENGINE_AGENT_TITLES:
-            engine = "insight"
+        engine = engine_raw.lower() if isinstance(engine_raw, str) and engine_raw else "source"
         block["engine"] = engine
-        block["title"] = ENGINE_AGENT_TITLES[engine]
+        block["title"] = "Data Source Quote"
         allowed_marks = {"bold", "italic"}
         raw_blocks = block.get("blocks")
         candidates = raw_blocks if isinstance(raw_blocks, list) else ([raw_blocks] if raw_blocks else [])
