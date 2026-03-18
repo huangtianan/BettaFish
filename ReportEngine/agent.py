@@ -402,14 +402,14 @@ class ReportAgent:
             error_log_dir=self.config.JSON_ERROR_LOG_DIR,
         )
     
-    def generate_report(self, query: str, reports: List[Any], forum_logs: str = "",
+    def generate_report(self, query: str, inputs: List[Any],
                         custom_template: str = "", save_report: bool = True,
                         stream_handler: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> str:
         """
         生成综合报告（章节JSON → IR → HTML）。
 
         主要阶段：
-            1. 归一化三引擎报告 + 论坛日志，并输出流式事件；
+            1. 归一化结构化输入数据，并输出流式事件；
             2. 模板选择 → 模板切片 → 文档布局 → 篇幅规划；
             3. 结合篇幅目标逐章调用LLM，遇到解析错误会自动重试；
             4. 将章节装订成Document IR，再交给HTML渲染器生成成品；
@@ -417,8 +417,8 @@ class ReportAgent:
 
         参数:
             query: 最终要生成的报告主题或提问语句。
-            reports: 来自 Query/Media/Insight 等分析引擎的原始输出，允许传入字符串或更复杂的对象。
-            forum_logs: 论坛/协同记录，供LLM理解多人讨论上下文。
+            inputs: 结构化输入列表，元素形如
+                {outputType, query, content, url}，允许包含扩展字段。
             custom_template: 用户指定的Markdown模板，如为空则交由模板节点自动挑选。
             save_report: 是否在生成后自动将HTML、IR与状态写入磁盘。
             stream_handler: 可选的流式事件回调，接收阶段标签与payload，用于UI实时展示。
@@ -436,7 +436,7 @@ class ReportAgent:
         self.state.metadata.query = query
         self.state.mark_processing()
 
-        normalized_reports = self._normalize_reports(reports)
+        normalized_inputs = self._normalize_inputs(inputs)
 
         def emit(event_type: str, payload: Dict[str, Any]):
             """面向Report Engine流通道的事件分发器，保证错误不外泄。"""
@@ -448,11 +448,11 @@ class ReportAgent:
                 logger.warning(f"流式事件回调失败: {callback_error}")
 
         logger.info(f"开始生成报告 {report_id}: {query}")
-        logger.info(f"输入数据 - 报告数量: {len(reports)}, 论坛日志长度: {len(str(forum_logs))}")
+        logger.info(f"输入数据条数: {len(inputs)}")
         emit('stage', {'stage': 'agent_start', 'report_id': report_id, 'query': query})
 
         try:
-            template_result = self._select_template(query, reports, forum_logs, custom_template)
+            template_result = self._select_template(query, inputs, custom_template)
             template_result = self._ensure_mapping(
                 template_result,
                 "模板选择结果",
@@ -478,8 +478,7 @@ class ReportAgent:
                 lambda: self.document_layout_node.run(
                     sections,
                     template_text,
-                    normalized_reports,
-                    forum_logs,
+                    normalized_inputs,
                     query,
                     template_overview,
                 ),
@@ -498,8 +497,7 @@ class ReportAgent:
                 lambda: self.word_budget_node.run(
                     sections,
                     layout_design,
-                    normalized_reports,
-                    forum_logs,
+                    normalized_inputs,
                     query,
                     template_overview,
                 ),
@@ -520,8 +518,7 @@ class ReportAgent:
 
             generation_context = self._build_generation_context(
                 query,
-                normalized_reports,
-                forum_logs,
+                normalized_inputs,
                 template_result,
                 layout_design,
                 chapter_targets,
@@ -775,7 +772,7 @@ class ReportAgent:
             emit('error', {'stage': 'agent_failed', 'message': str(e)})
             raise
     
-    def _select_template(self, query: str, reports: List[Any], forum_logs: str, custom_template: str):
+    def _select_template(self, query: str, inputs: List[Any], custom_template: str):
         """
         选择报告模板。
 
@@ -785,8 +782,7 @@ class ReportAgent:
 
         参数:
             query: 报告主题，用于提示词聚焦行业/事件。
-            reports: 多来源报告原文，帮助LLM判断结构复杂度。
-            forum_logs: 对应论坛或协作讨论的文本，用于补充背景。
+            inputs: 结构化输入数据，帮助LLM判断结构复杂度。
             custom_template: CLI/前端传入的自定义Markdown模板，非空时直接采用。
 
         返回:
@@ -805,8 +801,7 @@ class ReportAgent:
         
         template_input = {
             'query': query,
-            'reports': reports,
-            'forum_logs': forum_logs
+            'dataset': inputs,
         }
         
         try:
@@ -863,8 +858,7 @@ class ReportAgent:
     def _build_generation_context(
         self,
         query: str,
-        reports: Dict[str, str],
-        forum_logs: str,
+        dataset: Dict[str, Any],
         template_result: Dict[str, Any],
         layout_design: Dict[str, Any],
         chapter_directives: Dict[str, Any],
@@ -880,8 +874,7 @@ class ReportAgent:
 
         参数:
             query: 用户查询词。
-            reports: 归一化后的 query/media/insight 报告映射。
-            forum_logs: 三引擎讨论记录。
+            dataset: 归一化后的结构化输入聚合数据。
             template_result: 模板节点返回的模板元信息。
             layout_design: 文档布局节点产出的标题/目录/主题设计。
             chapter_directives: 字数规划节点返回的章节指令映射。
@@ -900,8 +893,7 @@ class ReportAgent:
         return {
             "query": query,
             "template_name": template_result.get("template_name"),
-            "reports": reports,
-            "forum_logs": self._stringify(forum_logs),
+            "dataset": dataset,
             "theme_tokens": theme_tokens,
             "style_directives": {
                 "tone": "analytical",
@@ -916,25 +908,64 @@ class ReportAgent:
             "word_plan": word_plan or {},
         }
 
-    def _normalize_reports(self, reports: List[Any]) -> Dict[str, str]:
+    def _normalize_inputs(self, inputs: List[Any]) -> Dict[str, Any]:
         """
-        将不同来源的报告统一转为字符串。
-
-        约定顺序为 Query/Media/Insight，引擎提供的对象可能是
-        字典或自定义类型，因此统一走 `_stringify` 做容错。
+        将结构化输入统一归一化并构建检索友好的数据集。
 
         参数:
-            reports: 任意类型的报告列表，允许缺失或顺序混乱。
+            inputs: 任意类型的输入列表，目标结构为
+                {outputType, query, content, url}。
 
         返回:
-            dict: 包含 `query_engine`/`media_engine`/`insight_engine` 三个字符串字段的映射。
+            dict: 包含 items/by_type/text_context/query_index 的数据集映射。
         """
-        keys = ["query_engine", "media_engine", "insight_engine"]
-        normalized: Dict[str, str] = {}
-        for idx, key in enumerate(keys):
-            value = reports[idx] if idx < len(reports) else ""
-            normalized[key] = self._stringify(value)
-        return normalized
+        normalized_items: List[Dict[str, Any]] = []
+        by_type: Dict[str, List[Dict[str, Any]]] = {
+            "table": [],
+            "plotly": [],
+            "summary": [],
+            "text": [],
+            "other": [],
+        }
+        query_index: Dict[str, List[str]] = {}
+        context_lines: List[str] = []
+
+        for idx, raw in enumerate(inputs or [], start=1):
+            if isinstance(raw, dict):
+                item = {
+                    "id": str(raw.get("id") or f"item_{idx}"),
+                    "outputType": str(raw.get("outputType") or "text").strip().lower(),
+                    "query": self._stringify(raw.get("query")),
+                    "content": self._stringify(raw.get("content")),
+                    "url": self._stringify(raw.get("url")),
+                    "meta": raw.get("meta") if isinstance(raw.get("meta"), dict) else {},
+                }
+            else:
+                item = {
+                    "id": f"item_{idx}",
+                    "outputType": "text",
+                    "query": "",
+                    "content": self._stringify(raw),
+                    "url": "",
+                    "meta": {},
+                }
+
+            normalized_items.append(item)
+            bucket = item["outputType"] if item["outputType"] in by_type else "other"
+            by_type[bucket].append(item)
+            if item["query"]:
+                query_index.setdefault(item["query"], []).append(item["id"])
+            content_preview = item["content"][:500]
+            context_lines.append(
+                f"[{item['id']}] ({item['outputType']}) query={item['query']}\n{content_preview}"
+            )
+
+        return {
+            "items": normalized_items,
+            "by_type": by_type,
+            "query_index": query_index,
+            "text_context": "\n\n".join(context_lines),
+        }
 
     def _should_retry_inappropriate_content_error(self, error: Exception) -> bool:
         """

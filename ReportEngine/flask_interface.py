@@ -411,29 +411,15 @@ def check_engines_ready() -> Dict[str, Any]:
     调用 ReportAgent 的基准检测逻辑，并附带论坛日志存在性，
     是 /status、/generate 的前置校验。
     """
-    directories = {
-        'insight': 'insight_engine_streamlit_reports',
-        'media': 'media_engine_streamlit_reports',
-        'query': 'query_engine_streamlit_reports'
-    }
-
-    forum_log_path = 'logs/forum.log'
-
     if not report_agent:
         return {
             'ready': False,
             'error': 'Report Engine未初始化'
         }
-
-    return report_agent.check_input_files(
-        directories['insight'],
-        directories['media'],
-        directories['query'],
-        forum_log_path
-    )
+    return {'ready': True, 'files_found': [], 'missing_files': [], 'latest_files': {}}
 
 
-def run_report_generation(task: ReportTask, query: str, custom_template: str = ""):
+def run_report_generation(task: ReportTask, query: str, inputs: List[Dict[str, Any]], custom_template: str = ""):
     """
     在后台线程中运行报告生成。
 
@@ -459,21 +445,11 @@ def run_report_generation(task: ReportTask, query: str, custom_template: str = "
         task.update_status("running", 5)
         task.publish_event('stage', {'message': '任务已启动，正在检查输入文件', 'stage': 'prepare'})
 
-        # 检查输入文件
-        check_result = check_engines_ready()
-        if not check_result['ready']:
-            task.update_status("error", 0, f"输入文件未准备就绪: {check_result.get('missing_files', [])}")
-            return
-
         task.publish_event('stage', {
-            'message': '输入文件检查通过，准备载入内容',
-            'stage': 'io_ready',
-            'files': check_result.get('latest_files', {})
+            'message': '输入数据已接收，启动生成流程',
+            'stage': 'data_loaded',
+            'input_count': len(inputs or []),
         })
-
-        # 加载输入文件
-        content = report_agent.load_input_files(check_result['latest_files'])
-        task.publish_event('stage', {'message': '源数据加载完成，启动生成流程', 'stage': 'data_loaded'})
 
         # 生成报告（附带兜底重试，缓解瞬时网络抖动）
         for attempt in range(1, 3):
@@ -485,8 +461,7 @@ def run_report_generation(task: ReportTask, query: str, custom_template: str = "
                 })
                 generation_result = report_agent.generate_report(
                     query=query,
-                    reports=content['reports'],
-                    forum_logs=content['forum_logs'],
+                    inputs=inputs,
                     custom_template=custom_template,
                     save_report=True,
                     stream_handler=stream_handler
@@ -649,13 +624,12 @@ def generate_report():
                 'error': 'Report Engine未初始化'
             }), 500
 
-        # 检查输入文件是否准备就绪
-        engines_status = check_engines_ready()
-        if not engines_status['ready']:
+        # 检查输入数据
+        inputs = data.get('inputs', [])
+        if not isinstance(inputs, list) or not inputs:
             return jsonify({
                 'success': False,
-                'error': '输入文件未准备就绪',
-                'missing_files': engines_status.get('missing_files', [])
+                'error': 'inputs必须是非空数组，元素结构为{outputType, query, content, url}'
             }), 400
 
         # 创建新任务
@@ -681,7 +655,7 @@ def generate_report():
         # 在后台线程中运行报告生成
         thread = threading.Thread(
             target=run_report_generation,
-            args=(task, query, custom_template),
+            args=(task, query, inputs, custom_template),
             daemon=True
         )
         thread.start()

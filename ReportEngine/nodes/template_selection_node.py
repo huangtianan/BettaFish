@@ -47,8 +47,7 @@ class TemplateSelectionNode(BaseNode):
         Args:
             input_data: 包含查询和报告内容的字典
                 - query: 原始查询
-                - reports: 三个子agent的报告列表
-                - forum_logs: 论坛日志内容
+                - dataset: 结构化任务结果列表
                 
         Returns:
             选择的模板信息，包含名称、内容与选择理由
@@ -56,8 +55,7 @@ class TemplateSelectionNode(BaseNode):
         logger.info("开始模板选择...")
         
         query = input_data.get('query', '')
-        reports = input_data.get('reports', [])
-        forum_logs = input_data.get('forum_logs', '')
+        dataset = input_data.get('dataset', [])
         
         # 获取可用模板
         available_templates = self._get_available_templates()
@@ -68,7 +66,7 @@ class TemplateSelectionNode(BaseNode):
         
         # 使用LLM进行模板选择
         try:
-            llm_result = self._llm_template_selection(query, reports, forum_logs, available_templates)
+            llm_result = self._llm_template_selection(query, dataset, available_templates)
             if llm_result:
                 return llm_result
         except Exception as e:
@@ -79,7 +77,7 @@ class TemplateSelectionNode(BaseNode):
     
 
     
-    def _llm_template_selection(self, query: str, reports: List[Any], forum_logs: str, 
+    def _llm_template_selection(self, query: str, dataset: List[Any],
                               available_templates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
         使用LLM进行模板选择。
@@ -89,8 +87,7 @@ class TemplateSelectionNode(BaseNode):
 
         参数:
             query: 用户输入的主题词。
-            reports: 多个分析引擎的报告内容。
-            forum_logs: 论坛日志，可能为空。
+            dataset: 输入任务结果列表。
             available_templates: 本地可用模板清单。
 
         返回:
@@ -102,45 +99,31 @@ class TemplateSelectionNode(BaseNode):
         template_list = "\n".join([f"- {t['name']}: {t['description']}" for t in available_templates])
         
         # 构建报告内容摘要
-        reports_summary = ""
-        if reports:
-            reports_summary = "\n\n=== 分析引擎报告内容 ===\n"
-            for i, report in enumerate(reports, 1):
-                # 获取报告内容，支持不同的数据格式
-                if isinstance(report, dict):
-                    content = report.get('content', str(report))
-                elif hasattr(report, 'content'):
-                    content = report.content
+        dataset_summary = ""
+        if dataset:
+            dataset_summary = "\n\n=== 输入数据摘要 ===\n"
+            for i, item in enumerate(dataset, 1):
+                if isinstance(item, dict):
+                    output_type = str(item.get("outputType", "text"))
+                    task_query = str(item.get("query", ""))
+                    content = str(item.get("content", ""))
                 else:
-                    content = str(report)
-                
-                # 截断过长的内容，保留前1000个字符
+                    output_type = "text"
+                    task_query = ""
+                    content = str(item)
                 if len(content) > 1000:
                     content = content[:1000] + "...(内容已截断)"
-                
-                reports_summary += f"\n报告{i}内容:\n{content}\n"
-        
-        # 构建论坛日志摘要
-        forum_summary = ""
-        if forum_logs and forum_logs.strip():
-            forum_summary = "\n\n=== 三个引擎的讨论内容 ===\n"
-            # 截断过长的日志内容，保留前800个字符
-            if len(forum_logs) > 800:
-                forum_content = forum_logs[:800] + "...(讨论内容已截断)"
-            else:
-                forum_content = forum_logs
-            forum_summary += forum_content
+                dataset_summary += f"\n条目{i} [{output_type}] query={task_query}\n{content}\n"
         
         user_message = f"""查询内容: {query}
 
-报告数量: {len(reports)} 个分析引擎报告
-论坛日志: {'有' if forum_logs else '无'}
-{reports_summary}{forum_summary}
+输入数据条目数: {len(dataset)}
+{dataset_summary}
 
 可用模板:
 {template_list}
 
-请根据查询内容、报告内容和论坛日志的具体情况，选择最合适的模板。"""
+请根据查询内容与输入数据的具体情况，选择最合适的模板。"""
         
         # 调用LLM
         response = self.llm_client.stream_invoke_to_string(SYSTEM_PROMPT_TEMPLATE_SELECTION, user_message)

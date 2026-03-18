@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 from loguru import logger
 
-from ReportEngine.ir.schema import ENGINE_AGENT_TITLES
 from ReportEngine.utils.chart_validator import (
     ChartValidator,
     ChartRepairer,
@@ -56,11 +55,6 @@ class HTMLRenderer:
         "blockquote",
         "code",
         "math",
-        "figure",
-        "kpiGrid",
-        "swotTable",
-        "pestTable",
-        "engineQuote",
     }
     INLINE_ARTIFACT_KEYS = {
         "props",
@@ -1122,16 +1116,11 @@ class HTMLRenderer:
             "paragraph": self._render_paragraph,
             "list": self._render_list,
             "table": self._render_table,
-            "swotTable": self._render_swot_table,
-            "pestTable": self._render_pest_table,
             "blockquote": self._render_blockquote,
-            "engineQuote": self._render_engine_quote,
             "hr": lambda b: "<hr />",
             "code": self._render_code,
             "math": self._render_math,
-            "figure": self._render_figure,
             "callout": self._render_callout,
-            "kpiGrid": self._render_kpi_grid,
             "widget": self._render_widget,
             "toc": lambda b: self._render_toc_section(),
         }
@@ -2159,11 +2148,10 @@ class HTMLRenderer:
 
     def _render_engine_quote(self, block: Dict[str, Any]) -> str:
         """渲染单Engine发言块，带独立配色与标题"""
-        engine_raw = (block.get("engine") or "").lower()
-        engine = engine_raw if engine_raw in ENGINE_AGENT_TITLES else "insight"
-        expected_title = ENGINE_AGENT_TITLES.get(engine, ENGINE_AGENT_TITLES["insight"])
+        engine_raw = str(block.get("engine") or "").lower()
+        engine = engine_raw or "source"
         title_raw = block.get("title") if isinstance(block.get("title"), str) else ""
-        title = title_raw if title_raw == expected_title else expected_title
+        title = title_raw or "Data Source Quote"
         inner = self._render_blocks(block.get("blocks", []))
         return (
             f'<div class="engine-quote engine-{self._escape_attr(engine)}">'
@@ -2736,6 +2724,24 @@ class HTMLRenderer:
         返回:
             str: 含canvas与配置脚本的HTML。
         """
+        widget_url = block.get("url")
+        if isinstance(widget_url, str) and widget_url.strip():
+            safe_url = self._escape_attr(widget_url.strip())
+            props_snapshot = block.get("props") if isinstance(block.get("props"), dict) else {}
+            display_title = props_snapshot.get("title") or block.get("title") or "外部可视化"
+            title_html = f'<div class="chart-title">{self._escape_html(display_title)}</div>' if display_title else ""
+            return f"""
+            <div class="chart-card external-widget-card">
+              {title_html}
+              <div class="chart-container external-widget-frame">
+                <iframe src="{safe_url}" loading="lazy" referrerpolicy="no-referrer" style="width:100%;height:520px;border:0;"></iframe>
+              </div>
+              <div class="chart-fallback" data-prebuilt="true">
+                <a href="{safe_url}" target="_blank" rel="noopener noreferrer">打开外部可视化链接</a>
+              </div>
+            </div>
+            """
+
         # 统一的审查/修复入口，避免后续重复修复
         widget_type = block.get('widgetType', '')
         is_chart = isinstance(widget_type, str) and widget_type.startswith('chart.js')
