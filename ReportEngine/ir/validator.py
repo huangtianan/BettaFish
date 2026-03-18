@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Tuple
 from .schema import (
     ALLOWED_BLOCK_TYPES,
     ALLOWED_INLINE_MARKS,
-    ENGINE_AGENT_TITLES,
     IR_VERSION,
 )
 
@@ -206,56 +205,6 @@ class IRValidator:
         for idx, sub_block in enumerate(inner):
             self._validate_block(sub_block, f"{path}.blocks[{idx}]", errors)
 
-    def _validate_engineQuote_block(
-        self, block: Dict[str, Any], path: str, errors: List[str]
-    ):
-        """单引擎发言块需标注engine并包含子blocks"""
-        engine_raw = block.get("engine")
-        engine = engine_raw.lower() if isinstance(engine_raw, str) else None
-        if engine not in {"insight", "media", "query"}:
-            errors.append(f"{path}.engine 取值非法: {engine_raw}")
-        title = block.get("title")
-        expected_title = ENGINE_AGENT_TITLES.get(engine) if engine else None
-        if title is None:
-            errors.append(f"{path}.title 缺失")
-        elif not isinstance(title, str):
-            errors.append(f"{path}.title 必须是字符串")
-        elif expected_title and title != expected_title:
-            errors.append(
-                f"{path}.title 必须与engine一致，使用对应Agent名称: {expected_title}"
-            )
-        inner = block.get("blocks")
-        if not isinstance(inner, list) or not inner:
-            errors.append(f"{path}.blocks 必须是非空数组")
-            return
-        for idx, sub_block in enumerate(inner):
-            sub_path = f"{path}.blocks[{idx}]"
-            if not isinstance(sub_block, dict):
-                errors.append(f"{sub_path} 必须是对象")
-                continue
-            if sub_block.get("type") != "paragraph":
-                errors.append(f"{sub_path}.type 仅允许 paragraph")
-                continue
-            # 复用 paragraph 结构校验，但限制 marks
-            inlines = sub_block.get("inlines")
-            if not isinstance(inlines, list) or not inlines:
-                errors.append(f"{sub_path}.inlines 必须是非空数组")
-                continue
-            for ridx, run in enumerate(inlines):
-                self._validate_inline_run(run, f"{sub_path}.inlines[{ridx}]", errors)
-                if not isinstance(run, dict):
-                    continue
-                marks = run.get("marks") or []
-                if not isinstance(marks, list):
-                    errors.append(f"{sub_path}.inlines[{ridx}].marks 必须是数组")
-                    continue
-                for midx, mark in enumerate(marks):
-                    mark_type = mark.get("type") if isinstance(mark, dict) else None
-                    if mark_type not in {"bold", "italic"}:
-                        errors.append(
-                            f"{sub_path}.inlines[{ridx}].marks[{midx}].type 仅允许 bold/italic"
-                        )
-
     def _validate_callout_block(self, block: Dict[str, Any], path: str, errors: List[str]):
         """callout需声明tone，并至少有一个子block"""
         tone = block.get("tone")
@@ -282,13 +231,14 @@ class IRValidator:
                 errors.append(f"{path}.items[{idx}] 需要label与value")
 
     def _validate_widget_block(self, block: Dict[str, Any], path: str, errors: List[str]):
-        """widget必须声明widgetId/type，并提供数据或数据引用"""
+        """widget必须声明widgetId/type，并提供可渲染的URL。"""
         if "widgetId" not in block:
             errors.append(f"{path}.widgetId 缺失")
         if "widgetType" not in block:
             errors.append(f"{path}.widgetType 缺失")
-        if "data" not in block and "dataRef" not in block:
-            errors.append(f"{path} 需要 data 或 dataRef 其一")
+        url = block.get("url")
+        if not isinstance(url, str) or not url.strip():
+            errors.append(f"{path}.url 缺失或为空")
 
     def _validate_code_block(self, block: Dict[str, Any], path: str, errors: List[str]):
         """code block至少要有content"""

@@ -19,7 +19,6 @@ from ..core import TemplateSection, ChapterStorage
 from ..ir import (
     ALLOWED_BLOCK_TYPES,
     ALLOWED_INLINE_MARKS,
-    ENGINE_AGENT_TITLES,
     IRValidator,
 )
 from ..prompts import (
@@ -297,19 +296,15 @@ class ChapterGenerationNode(BaseNode):
 
         参数:
             section: 当前要生成的章节，提供标题/编号/提纲。
-            context: 全局上下文字典，包含主题、三引擎报告、篇幅规划等。
+            context: 全局上下文字典，包含主题、结构化输入、篇幅规划等。
 
         返回:
             dict: 可以直接序列化进提示词的payload，兼顾章节信息与全局约束。
         """
-        reports = context.get("reports", {})
+        dataset = context.get("dataset", {})
         # 章节篇幅规划（来自WordBudgetNode），用于指导字数与强调点
         chapter_plan_map = context.get("chapter_directives", {})
         chapter_plan = chapter_plan_map.get(section.chapter_id) if chapter_plan_map else {}
-
-        # 从 layout 的 tocPlan 中查找该章节是否允许使用SWOT块和PEST块
-        allow_swot = self._get_chapter_swot_permission(section.chapter_id, context)
-        allow_pest = self._get_chapter_pest_permission(section.chapter_id, context)
 
         payload = {
             "section": {
@@ -329,23 +324,17 @@ class ChapterGenerationNode(BaseNode):
                 "layout": context.get("layout"),
                 "templateOverview": context.get("template_overview", {}),
             },
-            "reports": {
-                "query_engine": reports.get("query_engine", ""),
-                "media_engine": reports.get("media_engine", ""),
-                "insight_engine": reports.get("insight_engine", ""),
-            },
-            "forumLogs": context.get("forum_logs", ""),
+            "dataset": dataset,
             "dataBundles": context.get("data_bundles", []),
             "constraints": {
                 "language": "zh-CN",
                 "maxTokens": context.get("max_tokens", 4096),
                 "allowedBlocks": ALLOWED_BLOCK_TYPES,
-                "allowSwot": allow_swot,
-                "allowPest": allow_pest,
                 "styleHints": {
                     "expectWidgets": True,
                     "forceHeadingAnchors": True,
                     "allowInlineMix": True,
+                    "externalWidgetUrlOnly": True,
                 },
             },
             "chapterPlan": chapter_plan,
@@ -365,72 +354,6 @@ class ChapterGenerationNode(BaseNode):
                 constraints["sectionBudgets"] = chapter_plan["sections"]
                 payload["globalContext"]["sectionBudgets"] = chapter_plan["sections"]
         return payload
-
-    def _get_chapter_swot_permission(self, chapter_id: str, context: Dict[str, Any]) -> bool:
-        """
-        从 layout 的 tocPlan 中查找指定章节是否允许使用 SWOT 块。
-
-        全文最多只有一个章节允许使用 SWOT 块，由文档设计阶段在 tocPlan 中
-        通过 allowSwot 字段标记。
-
-        参数:
-            chapter_id: 当前章节ID。
-            context: 全局上下文字典。
-
-        返回:
-            bool: 如果该章节允许使用 SWOT 块则返回 True，否则返回 False。
-        """
-        layout = context.get("layout")
-        if not isinstance(layout, dict):
-            return False
-
-        toc_plan = layout.get("tocPlan")
-        if not isinstance(toc_plan, list):
-            return False
-
-        for entry in toc_plan:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("chapterId") == chapter_id:
-                return bool(entry.get("allowSwot", False))
-
-        return False
-
-    def _get_chapter_pest_permission(self, chapter_id: str, context: Dict[str, Any]) -> bool:
-        """
-        从 layout 的 tocPlan 中查找指定章节是否允许使用 PEST 块。
-
-        全文最多只有一个章节允许使用 PEST 块，由文档设计阶段在 tocPlan 中
-        通过 allowPest 字段标记。
-
-        PEST块用于宏观环境分析：
-        - Political（政治因素）
-        - Economic（经济因素）
-        - Social（社会因素）
-        - Technological（技术因素）
-
-        参数:
-            chapter_id: 当前章节ID。
-            context: 全局上下文字典。
-
-        返回:
-            bool: 如果该章节允许使用 PEST 块则返回 True，否则返回 False。
-        """
-        layout = context.get("layout")
-        if not isinstance(layout, dict):
-            return False
-
-        toc_plan = layout.get("tocPlan")
-        if not isinstance(toc_plan, list):
-            return False
-
-        for entry in toc_plan:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("chapterId") == chapter_id:
-                return bool(entry.get("allowPest", False))
-
-        return False
 
     def _stream_llm(
         self,
@@ -1391,11 +1314,9 @@ class ChapterGenerationNode(BaseNode):
     def _sanitize_engine_quote_block(self, block: Dict[str, Any]):
         """engineQuote仅用于单Agent发言，内部仅允许paragraph且title需锁定Agent名称"""
         engine_raw = block.get("engine")
-        engine = engine_raw.lower() if isinstance(engine_raw, str) else None
-        if engine not in ENGINE_AGENT_TITLES:
-            engine = "insight"
+        engine = engine_raw.lower() if isinstance(engine_raw, str) and engine_raw else "source"
         block["engine"] = engine
-        block["title"] = ENGINE_AGENT_TITLES[engine]
+        block["title"] = "Data Source Quote"
         allowed_marks = {"bold", "italic"}
         raw_blocks = block.get("blocks")
         candidates = raw_blocks if isinstance(raw_blocks, list) else ([raw_blocks] if raw_blocks else [])
@@ -1968,15 +1889,18 @@ class ChapterGenerationNode(BaseNode):
         return result
 
     def _normalize_widget_block(self, block: Dict[str, Any]):
-        """确保widget具备顶层data或dataRef"""
-        has_data = block.get("data") is not None or block.get("dataRef") is not None
-        if has_data:
+        """确保widget具备可供前端渲染的url。"""
+        url = block.get("url")
+        if isinstance(url, str) and url.strip():
             return
         props = block.get("props")
-        if isinstance(props, dict) and "data" in props:
-            block["data"] = props.pop("data")
+        if isinstance(props, dict) and isinstance(props.get("url"), str) and props.get("url").strip():
+            block["url"] = props.pop("url")
             return
-        block["data"] = {"labels": [], "datasets": []}
+        if isinstance(block.get("dataRef"), str) and block["dataRef"].strip():
+            block["url"] = block["dataRef"].strip()
+            return
+        block["url"] = "about:blank"
 
     def _ensure_block_type(self, block: Dict[str, Any]):
         """若block缺少合法type，则降级为paragraph"""

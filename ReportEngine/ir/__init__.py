@@ -11,7 +11,6 @@ from .schema import (
     CHAPTER_JSON_SCHEMA_TEXT,
     ALLOWED_BLOCK_TYPES,
     ALLOWED_INLINE_MARKS,
-    ENGINE_AGENT_TITLES,
 )
 from .validator import IRValidator
 
@@ -21,6 +20,5 @@ __all__ = [
     "CHAPTER_JSON_SCHEMA_TEXT",
     "ALLOWED_BLOCK_TYPES",
     "ALLOWED_INLINE_MARKS",
-    "ENGINE_AGENT_TITLES",
     "IRValidator",
 ]

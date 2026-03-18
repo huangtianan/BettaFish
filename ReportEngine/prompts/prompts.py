@@ -31,10 +31,7 @@ input_schema_html_generation = {
     "type": "object",
     "properties": {
         "query": {"type": "string"},
-        "query_engine_report": {"type": "string"},
-        "media_engine_report": {"type": "string"},
-        "insight_engine_report": {"type": "string"},
-        "forum_logs": {"type": "string"},
+        "inputs": {"type": "array", "items": {"type": "object"}},
         "selected_template": {"type": "string"}
     }
 }
@@ -63,15 +60,15 @@ chapter_generation_input_schema = {
                 "styleDirectives": {"type": "object"}
             }
         },
-        "reports": {
+        "dataset": {
             "type": "object",
             "properties": {
-                "query_engine": {"type": "string"},
-                "media_engine": {"type": "string"},
-                "insight_engine": {"type": "string"}
+                "items": {"type": "array", "items": {"type": "object"}},
+                "by_type": {"type": "object"},
+                "query_index": {"type": "object"},
+                "text_context": {"type": "string"}
             }
         },
-        "forumLogs": {"type": "string"},
         "dataBundles": {
             "type": "array",
             "items": {"type": "object"}
@@ -88,7 +85,7 @@ chapter_generation_input_schema = {
             }
         }
     },
-    "required": ["section", "globalContext", "reports"]
+    "required": ["section", "globalContext", "dataset"]
 }
 
 # HTML报告生成输出Schema - 已简化，不再使用JSON格式
@@ -139,14 +136,6 @@ document_layout_output_schema = {
                     "anchor": {"type": "string"},
                     "display": {"type": "string"},
                     "description": {"type": "string"},
-                    "allowSwot": {
-                        "type": "boolean",
-                        "description": "是否允许该章节使用SWOT分析块，全文最多只有一个章节可设为true",
-                    },
-                    "allowPest": {
-                        "type": "boolean",
-                        "description": "是否允许该章节使用PEST分析块，全文最多只有一个章节可设为true",
-                    },
                 },
                 "required": ["chapterId", "display"],
             },
@@ -210,13 +199,12 @@ SYSTEM_PROMPT_TEMPLATE_SELECTION = f"""
 3. 分析的深度和广度要求
 4. 目标受众和使用场景
 
-可用模板类型，推荐使用“社会公共热点事件分析报告模板”：
-- 企业品牌声誉分析报告模板：适用于品牌形象、声誉管理分析当需要对品牌在特定周期内（如年度、半年度）的整体网络形象、资产健康度进行全面、深度的评估与复盘时，应选择此模板。核心任务是战略性、全局性分析。
-- 市场竞争格局舆情分析报告模板：当目标是系统性地分析一个或多个核心竞争对手的声量、口碑、市场策略及用户反馈，以明确自身市场位置并制定差异化策略时，应选择此模板。核心任务是对比与洞察。
-- 日常或定期舆情监测报告模板：当需要进行常态化、高频次（如每周、每月）的舆情追踪，旨在快速掌握动态、呈现关键数据、并及时发现热点与风险苗头时，应选择此模板。核心任务是数据呈现与动态追踪。
-- 特定政策或行业动态舆情分析报告：当监测到重要政策发布、法规变动或足以影响整个行业的宏观动态时，应选择此模板。核心任务是深度解读、预判趋势及对本机构的潜在影响。
-- 社会公共热点事件分析报告模板：当社会上出现与本机构无直接关联，但已形成广泛讨论的公共热点、文化现象或网络流行趋势时，应选择此模板。核心任务是洞察社会心态，并评估事件与本机构的关联性（风险与机遇）。
-- 突发事件与危机公关舆情报告模板：当监测到与本机构直接相关的、具有潜在危害的突发负面事件时，应选择此模板。核心任务是快速响应、评估风险、控制事态。
+可用模板类型请选择最匹配输入数据结构与目标读者的模板：
+- 研究分析类模板：适合战略研判、行业研究、政策解读。
+- 运营复盘类模板：适合阶段复盘、项目评估、行动闭环。
+- 数据洞察类模板：适合以图表/表格链接为主的证据型报告。
+- 事件追踪类模板：适合按时间线记录事实、变化与影响。
+- 风险与建议类模板：适合输出风险分级、处置建议和优先级。
 
 请按照以下JSON模式定义格式化输出：
 
@@ -239,15 +227,15 @@ SYSTEM_PROMPT_TEMPLATE_SELECTION = f"""
 
 # HTML报告生成的系统提示词
 SYSTEM_PROMPT_HTML_GENERATION = f"""
-你是一位专业的HTML报告生成专家。你将接收来自三个分析引擎的报告内容、论坛监控日志以及选定的报告模板，需要生成一份不少于3万字的完整的HTML格式分析报告。
+你是一位专业的HTML报告生成专家。你将接收结构化任务结果（inputs）以及选定的报告模板，需要生成一份不少于3万字的完整HTML格式分析报告。
 
 <INPUT JSON SCHEMA>
 {json.dumps(input_schema_html_generation, indent=2, ensure_ascii=False)}
 </INPUT JSON SCHEMA>
 
 **你的任务：**
-1. 整合三个引擎的分析结果，避免重复内容
-2. 结合三个引擎在分析时的相互讨论数据（forum_logs），站在不同角度分析内容
+1. 整合输入任务结果，避免重复内容
+2. 基于输入数据形成多角度分析
 3. 按照选定模板的结构组织内容
 4. 生成包含数据可视化的完整HTML报告，不少于3万字
 
@@ -267,16 +255,14 @@ SYSTEM_PROMPT_HTML_GENERATION = f"""
    - 不要采用需要展开内容的前端效果，一次性完整显示
 
 3. **数据可视化**：
-   - 使用Chart.js生成图表
-   - 情感分析饼图
-   - 趋势分析折线图
-   - 数据源分布图
-   - 论坛活动统计图
+   - 使用外部URL嵌入图表/表格
+   - 不在报告里生成Chart.js/ECharts配置
+   - 外部图表需要提供可访问链接并给出文字解读
 
 4. **内容结构**：
    - 报告标题和摘要
-   - 各引擎分析结果整合
-   - 论坛数据分析
+   - 输入任务结果整合
+   - 数据证据与方法说明
    - 综合结论和建议
    - 数据附录
 
@@ -294,7 +280,7 @@ SYSTEM_PROMPT_HTML_GENERATION = f"""
 - 专业的配色方案
 
 **JavaScript功能要求：**
-- Chart.js图表渲染
+- 外部URL组件渲染
 - 页面交互逻辑
 - 导出功能
 - 主题切换
@@ -308,35 +294,24 @@ SYSTEM_PROMPT_CHAPTER_JSON = f"""
 符合《可执行JSON契约(IR)》的章节JSON。稍后我会提供单个章节要点、
 全局数据与风格指令，你需要：
 1. 完全遵循IR版本 {IR_VERSION} 的结构，严禁输出HTML或Markdown。
-2. 仅使用以下Block类型：{', '.join(ALLOWED_BLOCK_TYPES)}；其中图表用block.type=widget并填充Chart.js配置。
+2. 仅使用以下Block类型：{', '.join(ALLOWED_BLOCK_TYPES)}；涉及外部可视化时统一使用block.type=widget并填写可访问的url。
 3. 所有段落都放入paragraph.inlines，混排样式通过marks表示（bold/italic/color/link等）。
 4. 所有heading必须包含anchor，锚点与编号保持模板一致，比如section-2-1。
-5. 表格需给出rows/cells/align，KPI卡请使用kpiGrid，分割线用hr。
-6. **SWOT块使用限制（重要！）**：
-   - 只有在 constraints.allowSwot 为 true 时才允许使用 block.type="swotTable"；
-   - 如果 constraints.allowSwot 为 false 或不存在，严禁生成任何 swotTable 类型的块，即使章节标题包含"SWOT"字样也不能使用该块类型，应改用表格（table）或列表（list）呈现相关内容；
-   - 当允许使用SWOT块时，分别填写 strengths/weaknesses/opportunities/threats 数组，单项至少包含 title/label/text 之一，可附加 detail/evidence/impact 字段；title/summary 字段用于概览说明；
-   - **特别注意：impact 字段只允许填写影响评级（"低"/"中低"/"中"/"中高"/"高"/"极高"）；任何关于影响的文字叙述、详细说明、佐证或扩展描述必须写入 detail 字段，禁止在 impact 字段中混入描述性文字。**
-7. **PEST块使用限制（重要！）**：
-   - 只有在 constraints.allowPest 为 true 时才允许使用 block.type="pestTable"；
-   - 如果 constraints.allowPest 为 false 或不存在，严禁生成任何 pestTable 类型的块，即使章节标题包含"PEST"、"宏观环境"等字样也不能使用该块类型，应改用表格（table）或列表（list）呈现相关内容；
-   - 当允许使用PEST块时，分别填写 political/economic/social/technological 数组，单项至少包含 title/label/text 之一，可附加 detail/source/trend 字段；title/summary 字段用于概览说明；
-   - **PEST四维度说明**：political（政治因素：政策法规、政府态度、监管环境）、economic（经济因素：经济周期、利率汇率、市场需求）、social（社会因素：人口结构、文化趋势、消费习惯）、technological（技术因素：技术创新、研发趋势、数字化程度）；
-   - **特别注意：trend 字段只允许填写趋势评估（"正面利好"/"负面影响"/"中性"/"不确定"/"持续观察"）；任何关于趋势的文字叙述、详细说明、来源或扩展描述必须写入 detail 字段，禁止在 trend 字段中混入描述性文字。**
-8. 如需引用图表/交互组件，统一用widgetType表示（例如chart.js/line、chart.js/doughnut）。
-9. 鼓励结合outline中列出的子标题，生成多层heading与细粒度内容，同时可补充callout、blockquote等。
-10. engineQuote 仅用于呈现单Agent的原话：使用 block.type="engineQuote"，engine 取值 insight/media/query，title 必须固定为对应Agent名字（insight->Insight Agent，media->Media Agent，query->Query Agent，不可自定义），内部 blocks 只允许 paragraph，paragraph.inlines 的 marks 仅可使用 bold/italic（可留空），禁止在 engineQuote 中放表格/图表/引用/公式等；当 reports 或 forumLogs 中有明确的文字段落、结论、数字/时间等可直接引用时，优先分别从 Query/Media/Insight 三个 Agent 摘出关键原文或文字版数据放入 engineQuote，尽量覆盖三类 Agent 而非只用单一来源，严禁臆造内容或把表格/图表改写进 engineQuote。
-11. 如果chapterPlan中包含target/min/max或sections细分预算，请尽量贴合，必要时在notes允许的范围内突破，同时在结构上体现详略；
-12. 一级标题需使用中文数字（“一、二、三”），二级标题使用阿拉伯数字（“1.1、1.2”），heading.text中直接写好编号，与outline顺序对应；
-13. 严禁输出外部图片/AI生图链接，仅可使用Chart.js图表、表格、色块、callout等HTML原生组件；如需视觉辅助请改为文字描述或数据表；
-14. 段落混排需通过marks表达粗体、斜体、下划线、颜色等样式，禁止残留Markdown语法（如**text**）；
-15. 行间公式用block.type="math"并填入math.latex，行内公式在paragraph.inlines里将文本设为Latex并加上marks.type="math"，渲染层会用MathJax处理；
-16. widget配色需与CSS变量兼容，不要硬编码背景色或文字色，legend/ticks由渲染层控制；
-17. 善用callout、kpiGrid、表格、widget等提升版面丰富度，但必须遵守模板章节范围。
-18. 输出前务必自检JSON语法：禁止出现`{{}}{{`或`][`相连缺少逗号、列表项嵌套超过一层、未闭合的括号或未转义换行，`list` block的items必须是`[[block,...], ...]`结构，若无法满足则返回错误提示而不是输出不合法JSON。
-19. 所有widget块必须在顶层提供`data`或`dataRef`（可将props中的`data`上移），确保Chart.js能够直接渲染；缺失数据时宁可输出表格或段落，绝不留空。
-20. 任何block都必须声明合法`type`（heading/paragraph/list/...）；若需要普通文本请使用`paragraph`并给出`inlines`，禁止返回`type:null`或未知值。
-21. blockquote内容限制：blockquote块内部的blocks只允许包含paragraph类型的block，严禁在blockquote内嵌套表格（table）、列表（list）、图表（widget）、标题（heading）、代码块（code）、公式（math）、嵌套引用（blockquote）等任何非paragraph块；如果引用内容需要用表格/列表等复杂结构呈现，必须将其移到blockquote外部。
+5. 表格需给出rows/cells/align，分割线用hr。
+6. 如需引用图表/交互组件，统一用widgetType表示（例如plotly、table-view），并提供url字段；不要生成Chart.js/ECharts的数据结构。
+7. widget块必须以外部URL为唯一数据源：填写widgetType、url、title即可，不要返回labels/datasets/data/options等图表配置。
+8. 鼓励结合outline中列出的子标题，生成多层heading与细粒度内容，同时可补充callout、blockquote等。
+9. 如果chapterPlan中包含target/min/max或sections细分预算，请尽量贴合，必要时在notes允许的范围内突破，同时在结构上体现详略；
+10. 一级标题需使用中文数字（“一、二、三”），二级标题使用阿拉伯数字（“1.1、1.2”），heading.text中直接写好编号，与outline顺序对应；
+11. 严禁输出外部图片/AI生图链接，仅可使用表格、色块、callout、外部URL widget等原生组件；如需视觉辅助请改为文字描述或数据表；
+12. 段落混排需通过marks表达粗体、斜体、下划线、颜色等样式，禁止残留Markdown语法（如**text**）；
+13. 行间公式用block.type="math"并填入math.latex，行内公式在paragraph.inlines里将文本设为Latex并加上marks.type="math"，渲染层会用MathJax处理；
+14. widget仅做外部资源嵌入，不在Report Engine中生成图表数据；
+15. 善用callout、表格、widget等提升版面丰富度，但必须遵守模板章节范围。
+16. 输出前务必自检JSON语法：禁止出现`{{}}{{`或`][`相连缺少逗号、列表项嵌套超过一层、未闭合的括号或未转义换行，`list` block的items必须是`[[block,...], ...]`结构，若无法满足则返回错误提示而不是输出不合法JSON。
+17. 所有widget块必须在顶层提供`url`（可选 `dataRef`），确保前端可直接按URL渲染；缺失URL时宁可输出表格或段落，绝不留空。
+18. 任何block都必须声明合法`type`（heading/paragraph/list/...）；若需要普通文本请使用`paragraph`并给出`inlines`，禁止返回`type:null`或未知值。
+19. blockquote内容限制：blockquote块内部的blocks只允许包含paragraph类型的block，严禁在blockquote内嵌套表格（table）、列表（list）、图表（widget）、标题（heading）、代码块（code）、公式（math）、嵌套引用（blockquote）等任何非paragraph块；如果引用内容需要用表格/列表等复杂结构呈现，必须将其移到blockquote外部。
 
 <CHAPTER JSON SCHEMA>
 {CHAPTER_JSON_SCHEMA_TEXT}
@@ -366,7 +341,7 @@ SYSTEM_PROMPT_CHAPTER_JSON_REPAIR = f"""
 """
 
 SYSTEM_PROMPT_CHAPTER_JSON_RECOVERY = f"""
-你是Report/Forum/Insight/Media联合的“JSON抢修官”，会拿到章节生成时的全部约束(generationPayload)以及原始失败输出(rawChapterOutput)。
+你是通用报告系统的“JSON抢修官”，会拿到章节生成时的全部约束(generationPayload)以及原始失败输出(rawChapterOutput)。
 
 请遵守：
 1. 章节必须满足IR版本 {IR_VERSION} 规范，block.type 仅能使用：{', '.join(ALLOWED_BLOCK_TYPES)}；
@@ -385,29 +360,18 @@ SYSTEM_PROMPT_CHAPTER_JSON_RECOVERY = f"""
 
 # 文档标题/目录/主题设计提示词
 SYSTEM_PROMPT_DOCUMENT_LAYOUT = f"""
-你是报告首席设计官，需要结合模板大纲与三个分析引擎的内容，为整本报告确定最终的标题、导语区、目录样式与美学要素。
+你是报告首席设计官，需要结合模板大纲与结构化输入数据，为整本报告确定最终的标题、导语区、目录样式与美学要素。
 
-输入包含 templateOverview（模板标题+目录整体）、sections 列表以及多源报告，请先把模板标题和目录当成一个整体，与多引擎内容对照后设计标题与目录，再延伸出可直接渲染的视觉主题。你的输出会被独立存储以便后续拼接，请确保字段齐备。
+输入包含 templateOverview（模板标题+目录整体）、sections 列表以及 dataset（结构化任务结果），请先把模板标题和目录当成一个整体，与输入数据对照后设计标题与目录，再延伸出可直接渲染的视觉主题。你的输出会被独立存储以便后续拼接，请确保字段齐备。
 
 目标：
 1. 生成具有中文叙事风格的 title/subtitle/tagline，并确保可直接放在封面中央，文案中需自然提到"文章总览"；
 2. 给出 hero：包含summary、highlights、actions、kpis（可含tone/delta），用于强调重点洞察与执行提示；
 3. 输出 tocPlan，一级目录固定用中文数字（"一、二、三"），二级目录用"1.1/1.2"，可在description里说明详略；如需定制目录标题，请填写 tocTitle；
 4. 根据模板结构和素材密度，为 themeTokens / layoutNotes 提出字体、字号、留白建议（需特别强调目录、正文一级标题字号保持统一），如需色板或暗黑模式兼容也在此说明；
-5. 严禁要求外部图片或AI生图，推荐Chart.js图表、表格、色块、KPI卡等可直接渲染的原生组件；
+5. 严禁要求外部图片或AI生图，推荐外部URL图表/表格、色块等可直接渲染的原生组件；
 6. 不随意增删章节，仅优化命名或描述；若有排版或章节合并提示，请放入 layoutNotes，渲染层会严格遵循；
-7. **SWOT块使用规则**：在 tocPlan 中决定是否以及在哪一章使用SWOT分析块（swotTable）：
-   - 全文最多只允许一个章节使用SWOT块，该章节需设置 `allowSwot: true`；
-   - 其他章节必须设置 `allowSwot: false` 或省略该字段；
-   - SWOT块适合出现在"结论与建议"、"综合评估"、"战略分析"等总结性章节；
-   - 如果报告内容不适合使用SWOT分析（如纯数据监测报告），则所有章节都不设置 `allowSwot: true`。
-8. **PEST块使用规则**：在 tocPlan 中决定是否以及在哪一章使用PEST宏观环境分析块（pestTable）：
-   - 全文最多只允许一个章节使用PEST块，该章节需设置 `allowPest: true`；
-   - 其他章节必须设置 `allowPest: false` 或省略该字段；
-   - PEST块用于分析宏观环境因素（政治Political、经济Economic、社会Social、技术Technological）；
-   - PEST块适合出现在"行业环境分析"、"宏观背景"、"外部环境研判"等分析宏观因素的章节；
-   - 如果报告主题与宏观环境分析无关（如具体事件危机公关报告），则所有章节都不设置 `allowPest: true`；
-   - SWOT和PEST不应出现在同一章节，二者分别侧重内部能力与外部环境。
+7. 如果章节需要可视化，请在目录描述中提示“引用外部URL图表/表格”，不要要求章节生成内嵌图表配置。
 
 **tocPlan的description字段特别要求：**
 - description字段必须是纯文本描述，用于在目录中展示章节简介

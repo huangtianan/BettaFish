@@ -39,8 +39,7 @@ class DocumentLayoutNode(BaseNode):
         self,
         sections: List[TemplateSection],
         template_markdown: str,
-        reports: Dict[str, str],
-        forum_logs: str,
+        dataset: Dict[str, Any],
         query: str,
         template_overview: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
@@ -50,8 +49,7 @@ class DocumentLayoutNode(BaseNode):
         参数:
             sections: 模板切片后的章节列表。
             template_markdown: 模板原文，用于LLM理解上下文。
-            reports: 三个引擎的内容映射。
-            forum_logs: 论坛讨论摘要。
+            dataset: 结构化输入数据集（含 items/by_type/text_context）。
             query: 用户查询词。
             template_overview: 预生成的模板概览，可复用以减少提示词长度。
 
@@ -70,8 +68,7 @@ class DocumentLayoutNode(BaseNode):
                 "title": sections[0].title if sections else "",
                 "chapters": [section.to_dict() for section in sections],
             },
-            "reports": reports,
-            "forumLogs": forum_logs,
+            "dataset": dataset,
         }
 
         user_message = build_document_layout_prompt(payload)
