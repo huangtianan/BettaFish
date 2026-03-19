@@ -537,32 +537,21 @@ class ReportAgent:
                 'toc': layout_design.get('tocTitle')
             })
             emit('progress', {'progress': 15, 'message': '文档标题/目录设计完成'})
-            # 使用刚生成的设计稿对全书进行篇幅规划，约束各章字数与重点
-            if design_payload.get("locks", {}).get("wordPlan") and isinstance(
-                design_payload.get("word_plan"), dict
-            ):
-                word_plan = self._normalize_word_plan(
-                    self._ensure_mapping(
-                        design_payload.get("word_plan"),
-                        "设计包篇幅规划",
-                        expected_keys=["chapters", "totalWords", "globalGuidelines"],
-                    ),
-                    "设计包篇幅规划",
-                )
-                emit('stage', {'stage': 'word_plan_reused', 'source': 'design_package'})
-            else:
-                word_plan = self._run_stage_with_retry(
-                    "章节篇幅规划",
-                    lambda: self.word_budget_node.run(
-                        sections,
-                        layout_design,
-                        normalized_inputs,
-                        query,
-                        template_overview,
-                    ),
-                    expected_keys=["chapters", "totalWords", "globalGuidelines"],
-                    postprocess=self._normalize_word_plan,
-                )
+            # 使用真实输入数据重新做篇幅规划（正式阶段不直接复用设计包中的word_plan）
+            if isinstance(design_payload.get("word_plan"), dict):
+                emit('stage', {'stage': 'word_plan_reference_loaded', 'source': 'design_package'})
+            word_plan = self._run_stage_with_retry(
+                "章节篇幅规划",
+                lambda: self.word_budget_node.run(
+                    sections,
+                    layout_design,
+                    normalized_inputs,
+                    query,
+                    template_overview,
+                ),
+                expected_keys=["chapters", "totalWords", "globalGuidelines"],
+                postprocess=self._normalize_word_plan,
+            )
             emit('stage', {
                 'stage': 'word_plan_ready',
                 'chapter_targets': len(word_plan.get('chapters', []))
@@ -910,7 +899,8 @@ class ReportAgent:
             "locks": {
                 "templateOverview": True,
                 "layout": True,
-                "wordPlan": True,
+                # 正式流程会基于真实输入重新计算wordPlan，此处默认不锁定
+                "wordPlan": False,
             },
             "template_overview": template_overview,
             "document_layout": layout_design,
