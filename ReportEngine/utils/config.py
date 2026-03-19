@@ -3,6 +3,7 @@ Report Engine 配置模块，统一读取环境变量并提供类型安全的访
 """
 
 import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Optional
@@ -56,7 +57,13 @@ class Settings(BaseSettings):
     CHAPTER_JSON_MAX_ATTEMPTS: int = Field(
         2, description="章节JSON解析失败时的最大尝试次数"
     )
-    TEMPLATE_DIR: str = Field("ReportEngine/report_template", description="多模板目录")
+    TEMPLATE_DIR: str = Field(
+        default_factory=lambda: str(
+            # utils/config.py -> utils -> ReportEngine -> report_template
+            Path(__file__).resolve().parent.parent / "report_template"
+        ),
+        description="多模板目录（默认基于 ReportEngine 包路径计算）",
+    )
     API_TIMEOUT: float = Field(900.0, description="单API超时时间（秒）")
     MAX_RETRY_DELAY: float = Field(180.0, description="最大重试间隔（秒）")
     MAX_RETRIES: int = Field(8, description="最大重试次数")

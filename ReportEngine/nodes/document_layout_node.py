@@ -68,7 +68,7 @@ class DocumentLayoutNode(BaseNode):
                 "title": sections[0].title if sections else "",
                 "chapters": [section.to_dict() for section in sections],
             },
-            "dataset": dataset,
+            "dataset": dataset.get("text_context", dataset.get("items", [])),
         }
 
         user_message = build_document_layout_prompt(payload)

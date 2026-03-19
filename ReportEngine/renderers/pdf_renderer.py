@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict
 from datetime import datetime
 from loguru import logger
-from ReportEngine.utils.dependency_check import (
+from ..utils.dependency_check import (
     prepare_pango_environment,
     check_pango_available,
 )
@@ -71,7 +71,7 @@ from .html_renderer import HTMLRenderer
 from .pdf_layout_optimizer import PDFLayoutOptimizer, PDFLayoutConfig
 from .chart_to_svg import create_chart_converter
 from .math_to_svg import MathToSVG
-from ReportEngine.utils.chart_review_service import get_chart_review_service
+from ..utils.chart_review_service import get_chart_review_service
 try:
     from wordcloud import WordCloud
     WORDCLOUD_AVAILABLE = True

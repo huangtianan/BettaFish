@@ -20,15 +20,15 @@ from pathlib import Path
 from typing import Any, Dict, List
 from loguru import logger
 
-from ReportEngine.utils.chart_validator import (
+from ..utils.chart_validator import (
     ChartValidator,
     ChartRepairer,
     ValidationResult,
     create_chart_validator,
     create_chart_repairer
 )
-from ReportEngine.utils.chart_repair_api import create_llm_repair_functions
-from ReportEngine.utils.chart_review_service import get_chart_review_service
+from ..utils.chart_repair_api import create_llm_repair_functions
+from ..utils.chart_review_service import get_chart_review_service
 
 
 class HTMLRenderer:

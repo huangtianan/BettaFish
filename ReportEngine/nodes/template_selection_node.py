@@ -6,6 +6,7 @@
 """
 
 import os
+from pathlib import Path
 import json
 from typing import Dict, Any, List, Optional
 from loguru import logger
@@ -23,7 +24,11 @@ class TemplateSelectionNode(BaseNode):
     并在失败时回退到内置模板。
     """
     
-    def __init__(self, llm_client, template_dir: str = "ReportEngine/report_template"):
+    _DEFAULT_TEMPLATE_DIR = str(
+        Path(__file__).resolve().parents[1] / "report_template"
+    )  # nodes -> ReportEngine -> report_template
+
+    def __init__(self, llm_client, template_dir: str = _DEFAULT_TEMPLATE_DIR):
         """
         初始化模板选择节点
 
@@ -103,17 +108,15 @@ class TemplateSelectionNode(BaseNode):
         if dataset:
             dataset_summary = "\n\n=== 输入数据摘要 ===\n"
             for i, item in enumerate(dataset, 1):
-                if isinstance(item, dict):
-                    output_type = str(item.get("outputType", "text"))
-                    task_query = str(item.get("query", ""))
-                    content = str(item.get("content", ""))
+                output_type = item.get("outputType", "text")
+                task_query = item.get("query", "")
+                if output_type == "plotly":
+                    content = item.get("url", "")
                 else:
-                    output_type = "text"
-                    task_query = ""
-                    content = str(item)
+                    content = item.get("content", "")
                 if len(content) > 1000:
                     content = content[:1000] + "...(内容已截断)"
-                dataset_summary += f"\n条目{i} [{output_type}] query={task_query}\n{content}\n"
+                dataset_summary += f"\n条目{i} [{output_type}] query={task_query}\n结果：{content}\n"
         
         user_message = f"""查询内容: {query}
 

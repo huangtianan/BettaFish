@@ -21,14 +21,14 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from ReportEngine.utils.chart_validator import (
+from .chart_validator import (
     ChartValidator,
     ChartRepairer,
     ValidationResult,
     create_chart_validator,
     create_chart_repairer
 )
-from ReportEngine.utils.chart_repair_api import create_llm_repair_functions
+from .chart_repair_api import create_llm_repair_functions
 
 
 @dataclass

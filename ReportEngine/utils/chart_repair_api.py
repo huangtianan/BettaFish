@@ -11,7 +11,7 @@ import json
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
-from ReportEngine.utils.config import settings
+from .config import settings
 
 
 # 图表修复提示词
@@ -382,7 +382,7 @@ def create_llm_repair_functions() -> List:
         def repair_with_report_engine(widget_block: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
             """使用ReportEngine的LLM修复图表"""
             try:
-                from ReportEngine.llms import LLMClient
+                from ..llms import LLMClient
 
                 client = LLMClient(
                     api_key=settings.REPORT_ENGINE_API_KEY,
@@ -417,7 +417,7 @@ def create_llm_repair_functions() -> List:
         def repair_with_forum_engine(widget_block: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
             """使用ForumEngine的LLM修复图表"""
             try:
-                from ReportEngine.llms import LLMClient
+                from ..llms import LLMClient
 
                 client = LLMClient(
                     api_key=settings.FORUM_HOST_API_KEY,
@@ -451,7 +451,7 @@ def create_llm_repair_functions() -> List:
         def repair_with_insight_engine(widget_block: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
             """使用InsightEngine的LLM修复图表"""
             try:
-                from ReportEngine.llms import LLMClient
+                from ..llms import LLMClient
 
                 client = LLMClient(
                     api_key=settings.INSIGHT_ENGINE_API_KEY,
@@ -485,7 +485,7 @@ def create_llm_repair_functions() -> List:
         def repair_with_media_engine(widget_block: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
             """使用MediaEngine的LLM修复图表"""
             try:
-                from ReportEngine.llms import LLMClient
+                from ..llms import LLMClient
 
                 client = LLMClient(
                     api_key=settings.MEDIA_ENGINE_API_KEY,
@@ -538,7 +538,7 @@ def create_table_repair_functions() -> List:
         def repair_table_with_report_engine(table_block: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
             """使用 ReportEngine 的 LLM 修复表格"""
             try:
-                from ReportEngine.llms import LLMClient
+                from ..llms import LLMClient
 
                 client = LLMClient(
                     api_key=settings.REPORT_ENGINE_API_KEY,
@@ -592,7 +592,7 @@ def create_wordcloud_repair_functions() -> List:
         def repair_wordcloud_with_report_engine(widget_block: Dict[str, Any], errors: List[str]) -> Optional[Dict[str, Any]]:
             """使用 ReportEngine 的 LLM 修复词云"""
             try:
-                from ReportEngine.llms import LLMClient
+                from ..llms import LLMClient
 
                 client = LLMClient(
                     api_key=settings.REPORT_ENGINE_API_KEY,

@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from ReportEngine.utils.chart_review_service import get_chart_review_service
+from ..utils.chart_review_service import get_chart_review_service
 
 
 class MarkdownRenderer:

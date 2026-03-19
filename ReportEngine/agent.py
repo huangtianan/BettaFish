@@ -26,6 +26,7 @@ from .core import (
 )
 from .ir import IRValidator
 from .llms import LLMClient
+from .llms.llm_api_adapter import LLMApiAdapter
 from .nodes import (
     TemplateSelectionNode,
     ChapterGenerationNode,
@@ -184,7 +185,12 @@ class ReportAgent:
     _CONTENT_SPARSE_WARNING_TEXT = "本章LLM生成的内容字数可能过低，必要时可以尝试重新运行程序。"
     _STRUCTURAL_RETRY_ATTEMPTS = 2
     
-    def __init__(self, config: Optional[Settings] = None):
+    def __init__(
+        self,
+        config: Optional[Settings] = None,
+        llm_api: Optional[Any] = None,
+        telemetry_logger: Optional[Any] = None,
+    ):
         """
         初始化Report Agent。
         
@@ -197,6 +203,10 @@ class ReportAgent:
             3. 初始化文件基准与章节落盘目录；
             4. 构建可序列化的状态容器，供外部服务查询。
         """
+        # 保存外部注入的 LLM（用于替代 ReportEngine 内部的 LLMClient）
+        self.llm_api = llm_api
+        self.telemetry_logger = telemetry_logger
+
         # 加载配置
         self.config = config or settings
         
@@ -206,7 +216,7 @@ class ReportAgent:
         # 初始化日志
         self._setup_logging()
         
-        # 初始化LLM客户端
+        # 初始化LLM客户端（可选：由 llm_api 注入覆盖）
         self.llm_client = self._initialize_llm()
         self.json_rescue_clients = self._initialize_rescue_llms()
         
@@ -230,7 +240,11 @@ class ReportAgent:
         os.makedirs(self.config.DOCUMENT_IR_OUTPUT_DIR, exist_ok=True)
         
         logger.info("Report Agent已初始化")
-        logger.info(f"使用LLM: {self.llm_client.get_model_info()}")
+        try:
+            logger.info(f"使用LLM: {self.llm_client.get_model_info()}")
+        except Exception:
+            # 适配器可能不完整时也不阻断主流程
+            logger.info("使用LLM: (unknown)")
         
     def _setup_logging(self):
         """
@@ -328,25 +342,37 @@ class ReportAgent:
         }
         self.file_baseline.initialize_baseline(directories)
     
-    def _initialize_llm(self) -> LLMClient:
+    def _initialize_llm(self) -> Any:
         """
         初始化LLM客户端。
 
         利用配置中的 API Key / 模型 / Base URL 构建统一的
         `LLMClient` 实例，为所有节点提供复用的推理入口。
         """
+        if self.llm_api is not None:
+            return LLMApiAdapter(self.llm_api)
+
         return LLMClient(
             api_key=self.config.REPORT_ENGINE_API_KEY,
             model_name=self.config.REPORT_ENGINE_MODEL_NAME,
             base_url=self.config.REPORT_ENGINE_BASE_URL,
         )
 
-    def _initialize_rescue_llms(self) -> List[Tuple[str, LLMClient]]:
+    def _initialize_rescue_llms(self) -> List[Tuple[str, Any]]:
         """
         初始化跨引擎章节修复所需的LLM客户端列表。
 
         顺序遵循“Report → Forum → Insight → Media”，缺失配置会被自动跳过。
         """
+        # 如果外部已注入 llm_api，则跨引擎“抢修”也统一走同一个 LLM。
+        if self.llm_api is not None and self.llm_client is not None:
+            return [
+                ("report_engine", self.llm_client),
+                ("forum_engine", self.llm_client),
+                ("insight_engine", self.llm_client),
+                ("media_engine", self.llm_client),
+            ]
+
         clients: List[Tuple[str, LLMClient]] = []
         if self.llm_client:
             clients.append(("report_engine", self.llm_client))
@@ -955,7 +981,7 @@ class ReportAgent:
             by_type[bucket].append(item)
             if item["query"]:
                 query_index.setdefault(item["query"], []).append(item["id"])
-            content_preview = item["content"][:500]
+            content_preview = item["content"] if item["outputType"] != "plotly" else item["url"]
             context_lines.append(
                 f"[{item['id']}] ({item['outputType']}) query={item['query']}\n{content_preview}"
             )

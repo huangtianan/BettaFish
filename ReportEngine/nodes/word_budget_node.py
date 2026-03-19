@@ -66,7 +66,7 @@ class WordBudgetNode(BaseNode):
                 "title": sections[0].title if sections else "",
                 "chapters": [section.to_dict() for section in sections],
             },
-            "dataset": dataset,
+            "dataset": dataset.get("text_context", dataset.get("items", [])),
         }
         user = build_word_budget_prompt(payload)
         response = self.llm_client.stream_invoke_to_string(

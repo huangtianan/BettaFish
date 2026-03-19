@@ -324,7 +324,7 @@ class ChapterGenerationNode(BaseNode):
                 "layout": context.get("layout"),
                 "templateOverview": context.get("template_overview", {}),
             },
-            "dataset": dataset,
+            "dataset": dataset.get("text_context", dataset.get("items", [])),
             "dataBundles": context.get("data_bundles", []),
             "constraints": {
                 "language": "zh-CN",

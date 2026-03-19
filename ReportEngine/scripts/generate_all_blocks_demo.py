@@ -19,10 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ReportEngine.core import DocumentComposer
-from ReportEngine.ir import IRValidator
-from ReportEngine.renderers import HTMLRenderer, MarkdownRenderer, PDFRenderer
-from ReportEngine.utils.config import settings
+from ..core import DocumentComposer
+from ..ir import IRValidator
+from ..renderers import HTMLRenderer, MarkdownRenderer, PDFRenderer
+from ..utils.config import settings
 
 
 def build_inline_marks_demo() -> dict:
