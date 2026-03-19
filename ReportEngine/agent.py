@@ -540,32 +540,21 @@ class ReportAgent:
                 'toc': layout_design.get('tocTitle')
             })
             emit('progress', {'progress': 15, 'message': '文档标题/目录设计完成'})
-            # 使用刚生成的设计稿对全书进行篇幅规划，约束各章字数与重点
-            if design_payload.get("locks", {}).get("wordPlan") and isinstance(
-                design_payload.get("word_plan"), dict
-            ):
-                word_plan = self._normalize_word_plan(
-                    self._ensure_mapping(
-                        design_payload.get("word_plan"),
-                        "设计包篇幅规划",
-                        expected_keys=["chapters", "totalWords", "globalGuidelines"],
-                    ),
-                    "设计包篇幅规划",
-                )
-                emit('stage', {'stage': 'word_plan_reused', 'source': 'design_package'})
-            else:
-                word_plan = self._run_stage_with_retry(
-                    "章节篇幅规划",
-                    lambda: self.word_budget_node.run(
-                        sections,
-                        layout_design,
-                        normalized_inputs,
-                        query,
-                        template_overview,
-                    ),
-                    expected_keys=["chapters", "totalWords", "globalGuidelines"],
-                    postprocess=self._normalize_word_plan,
-                )
+            # 使用真实输入数据重新做篇幅规划（正式阶段不直接复用设计包中的word_plan）
+            if isinstance(design_payload.get("word_plan"), dict):
+                emit('stage', {'stage': 'word_plan_reference_loaded', 'source': 'design_package'})
+            word_plan = self._run_stage_with_retry(
+                "章节篇幅规划",
+                lambda: self.word_budget_node.run(
+                    sections,
+                    layout_design,
+                    normalized_inputs,
+                    query,
+                    template_overview,
+                ),
+                expected_keys=["chapters", "totalWords", "globalGuidelines"],
+                postprocess=self._normalize_word_plan,
+            )
             emit('stage', {
                 'stage': 'word_plan_ready',
                 'chapter_targets': len(word_plan.get('chapters', []))
@@ -840,6 +829,7 @@ class ReportAgent:
         template_name: str = "",
         query: str = "",
         save_package: bool = True,
+        include_document_ir: bool = False,
     ) -> Dict[str, Any]:
         """
         生成“模板设计阶段”可复用数据包（基于虚拟数据）。
@@ -854,9 +844,11 @@ class ReportAgent:
             template_name: 模板名称，未提供时自动从模板正文提取标题。
             query: 可选主题词，用于模拟场景补充。
             save_package: 是否落盘 design_package 及其 artifacts。
+            include_document_ir: 是否基于 mock_inputs 继续生成完整 document_ir（默认False）。
 
         返回:
             dict: 设计包元数据 + 三类可复用产物（template_overview/layout/word_plan）。
+                  当 include_document_ir=True 时，额外返回 document_ir。
         """
         if not template_markdown or not template_markdown.strip():
             raise ValueError("模板内容为空，无法生成设计包")
@@ -915,13 +907,74 @@ class ReportAgent:
             "locks": {
                 "templateOverview": True,
                 "layout": True,
-                "wordPlan": True,
+                # 正式流程会基于真实输入重新计算wordPlan，此处默认不锁定
+                "wordPlan": False,
             },
             "template_overview": template_overview,
             "document_layout": layout_design,
             "word_plan": word_plan,
             "mock_inputs": mock_inputs,
         }
+
+        if include_document_ir:
+            chapter_targets = {
+                entry.get("chapterId"): entry
+                for entry in word_plan.get("chapters", [])
+                if isinstance(entry, dict) and entry.get("chapterId")
+            }
+            shared_context = self._build_chapter_context(
+                layout_design,
+                chapter_targets,
+                word_plan,
+                template_overview,
+                mock_dataset,
+            )
+            manifest_meta = {
+                "title": layout_design.get("title") or resolved_template_name,
+                "subtitle": layout_design.get("subtitle"),
+                "tagline": layout_design.get("tagline"),
+                "generatedAt": datetime.utcnow().isoformat() + "Z",
+                "sourceQuery": design_query,
+                "templateOverview": template_overview,
+                "toc": {
+                    "title": layout_design.get("tocTitle") or "目录",
+                    "entries": [section.to_toc_entry() for section in sections],
+                },
+                "hero": layout_design.get("hero"),
+                "layoutNotes": layout_design.get("layoutNotes"),
+                "wordPlan": {
+                    "totalWords": word_plan.get("totalWords"),
+                    "globalGuidelines": word_plan.get("globalGuidelines"),
+                    "chapters": word_plan.get("chapters"),
+                },
+            }
+            if layout_design.get("themeTokens"):
+                manifest_meta["themeTokens"] = layout_design["themeTokens"]
+            if layout_design.get("tocPlan"):
+                manifest_meta["toc"]["customEntries"] = layout_design["tocPlan"]
+
+            design_report_id = f"{package_id}-mock"
+            run_dir = self.chapter_storage.start_session(design_report_id, manifest_meta)
+            self._persist_planning_artifacts(
+                run_dir,
+                layout_design,
+                word_plan,
+                template_overview,
+            )
+
+            chapters = []
+            for section in sections:
+                chapter_payload = self.chapter_generation_node.run(
+                    section=section,
+                    context=shared_context,
+                    run_dir=run_dir,
+                    stream_handler=None,
+                )
+                chapters.append(chapter_payload)
+            package["document_ir"] = self.document_composer.build_document(
+                chapters,
+                manifest_meta,
+            )
 
         if save_package:
             package_dir = Path(self.config.OUTPUT_DIR) / "design_packages" / package_id
@@ -933,6 +986,8 @@ class ReportAgent:
                 "mock_inputs.json": mock_inputs,
                 "design_package.json": package,
             }
+            if include_document_ir and isinstance(package.get("document_ir"), dict):
+                artifacts["document_ir.json"] = package["document_ir"]
             for filename, payload in artifacts.items():
                 target = package_dir / filename
                 target.write_text(
