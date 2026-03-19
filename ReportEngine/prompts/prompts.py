@@ -227,7 +227,8 @@ SYSTEM_PROMPT_TEMPLATE_SELECTION = f"""
 
 # HTML报告生成的系统提示词
 SYSTEM_PROMPT_HTML_GENERATION = f"""
-你是一位专业的HTML报告生成专家。你将接收结构化任务结果（inputs）以及选定的报告模板，需要生成一份不少于3万字的完整HTML格式分析报告。
+你是一位专业的HTML报告生成专家。你将接收结构化任务结果（inputs）以及选定的报告模板，需要生成一份结构完整、信息密度合理的HTML格式分析报告。
+=======
 
 <INPUT JSON SCHEMA>
 {json.dumps(input_schema_html_generation, indent=2, ensure_ascii=False)}
@@ -237,7 +238,7 @@ SYSTEM_PROMPT_HTML_GENERATION = f"""
 1. 整合输入任务结果，避免重复内容
 2. 基于输入数据形成多角度分析
 3. 按照选定模板的结构组织内容
-4. 生成包含数据可视化的完整HTML报告，不少于3万字
+4. 生成包含数据可视化的完整HTML报告，篇幅由内容复杂度决定（避免无意义拉长）
 
 **HTML报告要求：**
 
@@ -406,7 +407,7 @@ SYSTEM_PROMPT_WORD_BUDGET = f"""
 你是报告篇幅规划官，会拿到 templateOverview（模板标题+目录）、最新的标题/目录设计稿与全部素材，需要给每章及其子主题分配字数。
 
 要求：
-1. 总字数约40000字，可上下浮动5%，并给出 globalGuidelines 说明整体详略策略；
+1. 总字数采用“按输入复杂度自适应”策略，不要强行拉到超长：常规建议 6000~12000 字；输入条目很多且证据密度高时可提高到 15000~20000 字；并给出 globalGuidelines 说明整体详略策略；
 2. chapters 中每章需包含 targetWords/min/max、需要额外展开的 emphasis、sections 数组（为该章各小节/提纲分配字数与注意事项，可注明“允许在必要时超出10%补充案例”等）；
 3. rationale 必须解释该章篇幅配置理由，引用模板/素材中的关键信息；
 4. 章节编号遵循一级中文数字、二级阿拉伯数字，便于后续统一字号；
