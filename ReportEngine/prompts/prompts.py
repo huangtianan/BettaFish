@@ -228,6 +228,7 @@ SYSTEM_PROMPT_TEMPLATE_SELECTION = f"""
 # HTML报告生成的系统提示词
 SYSTEM_PROMPT_HTML_GENERATION = f"""
 你是一位专业的HTML报告生成专家。你将接收结构化任务结果（inputs）以及选定的报告模板，需要生成一份结构完整、信息密度合理的HTML格式分析报告。
+=======
 
 <INPUT JSON SCHEMA>
 {json.dumps(input_schema_html_generation, indent=2, ensure_ascii=False)}
