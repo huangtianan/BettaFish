@@ -22,6 +22,7 @@ from .core import (
     ChapterStorage,
     DocumentComposer,
     TemplateSection,
+    build_mock_inputs_for_template,
     parse_template_sections,
 )
 from .ir import IRValidator
@@ -430,7 +431,8 @@ class ReportAgent:
     
     def generate_report(self, query: str, inputs: List[Any],
                         custom_template: str = "", save_report: bool = True,
-                        stream_handler: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> str:
+                        stream_handler: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+                        design_package: Optional[Any] = None) -> str:
         """
         生成综合报告（章节JSON → IR → HTML）。
 
@@ -497,20 +499,38 @@ class ReportAgent:
             emit('stage', {'stage': 'template_sliced', 'section_count': len(sections)})
 
             template_text = template_result.get('template_content', '')
+            design_payload = self._load_design_package_payload(design_package)
+
             template_overview = self._build_template_overview(template_text, sections)
+            if design_payload.get("locks", {}).get("templateOverview") and isinstance(
+                design_payload.get("template_overview"), dict
+            ):
+                template_overview = design_payload["template_overview"]
+                emit('stage', {'stage': 'template_overview_reused', 'source': 'design_package'})
+
             # 基于模板骨架+三引擎内容设计全局标题、目录与视觉主题
-            layout_design = self._run_stage_with_retry(
-                "文档设计",
-                lambda: self.document_layout_node.run(
-                    sections,
-                    template_text,
-                    normalized_inputs,
-                    query,
-                    template_overview,
-                ),
-                # toc 字段已被 tocPlan 取代，这里按最新Schema挑选/校验
-                expected_keys=["title", "hero", "tocPlan", "tocTitle"],
-            )
+            if design_payload.get("locks", {}).get("layout") and isinstance(
+                design_payload.get("document_layout"), dict
+            ):
+                layout_design = self._ensure_mapping(
+                    design_payload.get("document_layout"),
+                    "设计包文档布局",
+                    expected_keys=["title", "hero", "tocPlan", "tocTitle"],
+                )
+                emit('stage', {'stage': 'layout_reused', 'source': 'design_package'})
+            else:
+                layout_design = self._run_stage_with_retry(
+                    "文档设计",
+                    lambda: self.document_layout_node.run(
+                        sections,
+                        template_text,
+                        normalized_inputs,
+                        query,
+                        template_overview,
+                    ),
+                    # toc 字段已被 tocPlan 取代，这里按最新Schema挑选/校验
+                    expected_keys=["title", "hero", "tocPlan", "tocTitle"],
+                )
             emit('stage', {
                 'stage': 'layout_designed',
                 'title': layout_design.get('title'),
@@ -518,18 +538,31 @@ class ReportAgent:
             })
             emit('progress', {'progress': 15, 'message': '文档标题/目录设计完成'})
             # 使用刚生成的设计稿对全书进行篇幅规划，约束各章字数与重点
-            word_plan = self._run_stage_with_retry(
-                "章节篇幅规划",
-                lambda: self.word_budget_node.run(
-                    sections,
-                    layout_design,
-                    normalized_inputs,
-                    query,
-                    template_overview,
-                ),
-                expected_keys=["chapters", "totalWords", "globalGuidelines"],
-                postprocess=self._normalize_word_plan,
-            )
+            if design_payload.get("locks", {}).get("wordPlan") and isinstance(
+                design_payload.get("word_plan"), dict
+            ):
+                word_plan = self._normalize_word_plan(
+                    self._ensure_mapping(
+                        design_payload.get("word_plan"),
+                        "设计包篇幅规划",
+                        expected_keys=["chapters", "totalWords", "globalGuidelines"],
+                    ),
+                    "设计包篇幅规划",
+                )
+                emit('stage', {'stage': 'word_plan_reused', 'source': 'design_package'})
+            else:
+                word_plan = self._run_stage_with_retry(
+                    "章节篇幅规划",
+                    lambda: self.word_budget_node.run(
+                        sections,
+                        layout_design,
+                        normalized_inputs,
+                        query,
+                        template_overview,
+                    ),
+                    expected_keys=["chapters", "totalWords", "globalGuidelines"],
+                    postprocess=self._normalize_word_plan,
+                )
             emit('stage', {
                 'stage': 'word_plan_ready',
                 'chapter_targets': len(word_plan.get('chapters', []))
@@ -797,6 +830,117 @@ class ReportAgent:
             logger.exception(f"报告生成过程中发生错误: {str(e)}")
             emit('error', {'stage': 'agent_failed', 'message': str(e)})
             raise
+
+    def generate_design_package(
+        self,
+        template_markdown: str,
+        template_name: str = "",
+        query: str = "",
+        save_package: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        生成“模板设计阶段”可复用数据包（基于虚拟数据）。
+
+        设计目标：
+            1. 在没有真实输入数据时，先完成模板的目录/主题/篇幅设计；
+            2. 将中间产物落盘，供正式流程直接复用并跳过重复LLM步骤；
+            3. 支持不同模板自动匹配不同虚拟数据画像，提升预览可信度。
+
+        参数:
+            template_markdown: 用户上传或编辑后的模板文本。
+            template_name: 模板名称，未提供时自动从模板正文提取标题。
+            query: 可选主题词，用于模拟场景补充。
+            save_package: 是否落盘 design_package 及其 artifacts。
+
+        返回:
+            dict: 设计包元数据 + 三类可复用产物（template_overview/layout/word_plan）。
+        """
+        if not template_markdown or not template_markdown.strip():
+            raise ValueError("模板内容为空，无法生成设计包")
+
+        sections = self._slice_template(template_markdown)
+        if not sections:
+            raise ValueError("模板无法解析出章节，无法生成设计包")
+
+        resolved_template_name = (
+            template_name
+            or self._extract_template_title(template_markdown, "未命名模板")
+        )
+        design_query = query or resolved_template_name
+        template_overview = self._build_template_overview(template_markdown, sections)
+        mock_inputs = build_mock_inputs_for_template(
+            resolved_template_name,
+            template_overview,
+            sections,
+            query=design_query,
+        )
+        mock_dataset = self._normalize_inputs(mock_inputs)
+
+        layout_design = self._run_stage_with_retry(
+            "模板设计-文档布局",
+            lambda: self.document_layout_node.run(
+                sections,
+                template_markdown,
+                mock_dataset,
+                design_query,
+                template_overview,
+            ),
+            expected_keys=["title", "hero", "tocPlan", "tocTitle"],
+        )
+        word_plan = self._run_stage_with_retry(
+            "模板设计-篇幅规划",
+            lambda: self.word_budget_node.run(
+                sections,
+                layout_design,
+                mock_dataset,
+                design_query,
+                template_overview,
+            ),
+            expected_keys=["chapters", "totalWords", "globalGuidelines"],
+            postprocess=self._normalize_word_plan,
+        )
+
+        package_id = f"design-{uuid4().hex[:8]}"
+        package = {
+            "version": "design-package/v1",
+            "packageId": package_id,
+            "templateName": resolved_template_name,
+            "query": design_query,
+            "createdAt": datetime.utcnow().isoformat() + "Z",
+            "locks": {
+                "templateOverview": True,
+                "layout": True,
+                "wordPlan": True,
+            },
+            "template_overview": template_overview,
+            "document_layout": layout_design,
+            "word_plan": word_plan,
+            "mock_inputs": mock_inputs,
+        }
+
+        if save_package:
+            package_dir = Path(self.config.OUTPUT_DIR) / "design_packages" / package_id
+            package_dir.mkdir(parents=True, exist_ok=True)
+            artifacts = {
+                "template_overview.json": template_overview,
+                "document_layout.json": layout_design,
+                "word_plan.json": word_plan,
+                "mock_inputs.json": mock_inputs,
+                "design_package.json": package,
+            }
+            for filename, payload in artifacts.items():
+                target = package_dir / filename
+                target.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            package["packageDir"] = str(package_dir)
+            package["artifactPaths"] = {
+                name: str((package_dir / name))
+                for name in artifacts.keys()
+            }
+
+        return package
     
     def _select_template(self, query: str, inputs: List[Any], custom_template: str):
         """
@@ -1145,6 +1289,37 @@ class ReportAgent:
             word_plan["totalWords"] = 10000
 
         return word_plan
+
+    def _load_design_package_payload(self, design_package: Optional[Any]) -> Dict[str, Any]:
+        """
+        解析设计阶段数据包，可接受字典或JSON文件路径。
+
+        参数:
+            design_package: dict 或 str(Path)；为空时返回空字典。
+
+        返回:
+            dict: 标准化后的设计包内容（最少包含 locks 字段）。
+        """
+        if not design_package:
+            return {}
+
+        payload: Dict[str, Any]
+        if isinstance(design_package, dict):
+            payload = design_package
+        elif isinstance(design_package, str):
+            package_path = Path(design_package)
+            if not package_path.exists():
+                raise ValueError(f"design_package路径不存在: {design_package}")
+            payload = json.loads(package_path.read_text(encoding="utf-8"))
+        else:
+            raise ValueError("design_package 仅支持 dict 或 JSON 文件路径")
+
+        if not isinstance(payload, dict):
+            raise ValueError("design_package 内容必须是JSON对象")
+        locks = payload.get("locks")
+        if not isinstance(locks, dict):
+            payload["locks"] = {}
+        return payload
 
     def _finalize_sparse_chapter(self, chapter: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """

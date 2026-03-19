@@ -419,7 +419,13 @@ def check_engines_ready() -> Dict[str, Any]:
     return {'ready': True, 'files_found': [], 'missing_files': [], 'latest_files': {}}
 
 
-def run_report_generation(task: ReportTask, query: str, inputs: List[Dict[str, Any]], custom_template: str = ""):
+def run_report_generation(
+    task: ReportTask,
+    query: str,
+    inputs: List[Dict[str, Any]],
+    custom_template: str = "",
+    design_package: Optional[Any] = None,
+):
     """
     在后台线程中运行报告生成。
 
@@ -464,7 +470,8 @@ def run_report_generation(task: ReportTask, query: str, inputs: List[Dict[str, A
                     inputs=inputs,
                     custom_template=custom_template,
                     save_report=True,
-                    stream_handler=stream_handler
+                    stream_handler=stream_handler,
+                    design_package=design_package,
                 )
                 break
             except ChapterJsonParseError as err:
@@ -613,6 +620,10 @@ def generate_report():
             data = {}
         query = data.get('query', '智能舆情分析报告')
         custom_template = data.get('custom_template', '')
+        design_package = data.get('design_package')
+        design_package_path = data.get('design_package_path')
+        if not design_package and design_package_path:
+            design_package = design_package_path
 
         # 清空日志文件
         clear_report_log()
@@ -655,7 +666,7 @@ def generate_report():
         # 在后台线程中运行报告生成
         thread = threading.Thread(
             target=run_report_generation,
-            args=(task, query, inputs, custom_template),
+            args=(task, query, inputs, custom_template, design_package),
             daemon=True
         )
         thread.start()
@@ -1050,6 +1061,71 @@ def get_templates():
 
     except Exception as e:
         logger.exception(f"获取可用模板列表失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@report_bp.route('/design-package', methods=['POST'])
+def build_design_package():
+    """
+    基于用户模板生成可复用的设计阶段数据包（template_overview/layout/word_plan）。
+
+    请求体支持：
+        - template_content: 直接提供模板Markdown文本（优先）
+        - template_name: 模板名称（可选，用于识别画像）
+        - template_filename: 从模板目录加载某个.md文件（当未提供template_content时）
+        - query: 可选主题词
+        - save_package: 是否落盘设计包（默认True）
+    """
+    try:
+        if not report_agent:
+            return jsonify({
+                'success': False,
+                'error': 'Report Engine未初始化'
+            }), 500
+
+        data = request.get_json(silent=True) or {}
+        template_content = (data.get("template_content") or "").strip()
+        template_name = (data.get("template_name") or "").strip()
+        template_filename = (data.get("template_filename") or "").strip()
+        query = (data.get("query") or "").strip()
+        save_package = data.get("save_package", True)
+
+        if not template_content and template_filename:
+            template_dir = settings.TEMPLATE_DIR
+            candidate_path = os.path.join(template_dir, template_filename)
+            if not os.path.exists(candidate_path):
+                return jsonify({
+                    'success': False,
+                    'error': f'模板文件不存在: {template_filename}'
+                }), 404
+            with open(candidate_path, 'r', encoding='utf-8') as f:
+                template_content = f.read()
+            if not template_name:
+                template_name = template_filename.replace(".md", "")
+
+        if not template_content:
+            return jsonify({
+                'success': False,
+                'error': '缺少template_content或template_filename'
+            }), 400
+
+        package = report_agent.generate_design_package(
+            template_markdown=template_content,
+            template_name=template_name,
+            query=query,
+            save_package=bool(save_package),
+        )
+
+        return jsonify({
+            'success': True,
+            'design_package': package,
+        })
+
+    except Exception as e:
+        logger.exception(f"生成设计阶段数据包失败: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
