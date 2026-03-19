@@ -21,7 +21,6 @@ if str(ROOT) not in sys.path:
 
 from ReportEngine.core import DocumentComposer
 from ReportEngine.ir import IRValidator
-from ReportEngine.ir.schema import ENGINE_AGENT_TITLES
 from ReportEngine.renderers import HTMLRenderer, MarkdownRenderer, PDFRenderer
 from ReportEngine.utils.config import settings
 
@@ -320,7 +319,7 @@ def build_chapters() -> list[dict]:
     engine_quote_block = {
         "type": "engineQuote",
         "engine": "insight",
-        "title": ENGINE_AGENT_TITLES["insight"],
+        "title": "Data Source Quote",
         "blocks": [
             {
                 "type": "paragraph",
