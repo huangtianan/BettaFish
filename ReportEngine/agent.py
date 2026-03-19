@@ -191,6 +191,7 @@ class ReportAgent:
         config: Optional[Settings] = None,
         llm_api: Optional[Any] = None,
         telemetry_logger: Optional[Any] = None,
+        code_executor: Optional[Any] = None,
     ):
         """
         初始化Report Agent。
@@ -207,6 +208,8 @@ class ReportAgent:
         # 保存外部注入的 LLM（用于替代 ReportEngine 内部的 LLMClient）
         self.llm_api = llm_api
         self.telemetry_logger = telemetry_logger
+        # 用于“每章 Python mock → 生成 table/chart url”
+        self.code_executor = code_executor
 
         # 加载配置
         self.config = config or settings
@@ -873,6 +876,8 @@ class ReportAgent:
             template_overview,
             sections,
             query=design_query,
+            llm_client=self.llm_client,
+            code_executor=self.code_executor,
         )
         mock_dataset = self._normalize_inputs(mock_inputs)
 
