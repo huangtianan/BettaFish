@@ -296,23 +296,23 @@ SYSTEM_PROMPT_CHAPTER_JSON = f"""
 全局数据与风格指令，你需要：
 1. 完全遵循IR版本 {IR_VERSION} 的结构，严禁输出HTML或Markdown。
 2. 仅使用以下Block类型：{', '.join(ALLOWED_BLOCK_TYPES)}；涉及外部可视化时统一使用block.type=widget并填写可访问的url。
-3. 所有段落都放入paragraph.inlines，混排样式通过marks表示（bold/italic/color/link等）。
+3. 所有段落都放入paragraph.inlines，混排样式通过marks表示（bold/italic/color/link）。
 4. 所有heading必须包含anchor，锚点与编号保持模板一致，比如section-2-1。
-5. 表格需给出rows/cells/align，分割线用hr。
+5. 内容组织优先使用paragraph/list/callout，必要时用heading分段，不要引入额外装饰性块。
 6. 如需引用图表/交互组件，统一用widgetType表示（例如plotly、table-view），并提供url字段；不要生成Chart.js/ECharts的数据结构。
 7. widget块必须以外部URL为唯一数据源：填写widgetType、url、title即可，不要返回labels/datasets/data/options等图表配置。
-8. 鼓励结合outline中列出的子标题，生成多层heading与细粒度内容，同时可补充callout、blockquote等。
+8. 鼓励结合outline中列出的子标题，生成多层heading与细粒度内容，同时可补充callout。
 9. 如果chapterPlan中包含target/min/max或sections细分预算，请尽量贴合，必要时在notes允许的范围内突破，同时在结构上体现详略；
 10. 一级标题需使用中文数字（“一、二、三”），二级标题使用阿拉伯数字（“1.1、1.2”），heading.text中直接写好编号，与outline顺序对应；
-11. 严禁输出外部图片/AI生图链接，仅可使用表格、色块、callout、外部URL widget等原生组件；如需视觉辅助请改为文字描述或数据表；
-12. 段落混排需通过marks表达粗体、斜体、下划线、颜色等样式，禁止残留Markdown语法（如**text**）；
-13. 行间公式用block.type="math"并填入math.latex，行内公式在paragraph.inlines里将文本设为Latex并加上marks.type="math"，渲染层会用MathJax处理；
+11. 严禁输出外部图片/AI生图链接，仅可使用色块、callout、外部URL widget等原生组件；如需视觉辅助请改为文字描述；
+12. 段落混排仅使用marks表达粗体、斜体、颜色、链接，禁止残留Markdown语法（如**text**）；
+13. 不生成公式块（math）或公式marks；如有公式内容请转写为普通文本说明；
 14. widget仅做外部资源嵌入，不在Report Engine中生成图表数据；
-15. 善用callout、表格、widget等提升版面丰富度，但必须遵守模板章节范围。
+15. 善用callout、list、widget等提升版面丰富度，但必须遵守模板章节范围。
 16. 输出前务必自检JSON语法：禁止出现`{{}}{{`或`][`相连缺少逗号、列表项嵌套超过一层、未闭合的括号或未转义换行，`list` block的items必须是`[[block,...], ...]`结构，若无法满足则返回错误提示而不是输出不合法JSON。
-17. 所有widget块必须在顶层提供`url`（可选 `dataRef`），确保前端可直接按URL渲染；缺失URL时宁可输出表格或段落，绝不留空。
+17. 所有widget块必须在顶层提供`url`（可选 `dataRef`），确保前端可直接按URL渲染；缺失URL时宁可输出段落或列表，绝不留空。
 18. 任何block都必须声明合法`type`（heading/paragraph/list/...）；若需要普通文本请使用`paragraph`并给出`inlines`，禁止返回`type:null`或未知值。
-19. blockquote内容限制：blockquote块内部的blocks只允许包含paragraph类型的block，严禁在blockquote内嵌套表格（table）、列表（list）、图表（widget）、标题（heading）、代码块（code）、公式（math）、嵌套引用（blockquote）等任何非paragraph块；如果引用内容需要用表格/列表等复杂结构呈现，必须将其移到blockquote外部。
+19. 不要生成blockquote/hr/code/toc等非核心块类型；若确需强调，请改用callout或paragraph表达。
 
 <CHAPTER JSON SCHEMA>
 {CHAPTER_JSON_SCHEMA_TEXT}
@@ -407,11 +407,17 @@ SYSTEM_PROMPT_WORD_BUDGET = f"""
 你是报告篇幅规划官，会拿到 templateOverview（模板标题+目录）、最新的标题/目录设计稿与全部素材，需要给每章及其子主题分配字数。
 
 要求：
-1. 总字数采用“按输入复杂度自适应”策略，不要强行拉到超长：常规建议 2000~12000 字；输入条目很多且证据密度高时可提高到 15000~20000 字；并给出 globalGuidelines 说明整体详略策略；
+1. 总字数按“不同场景 + 输入复杂度”估算，不要强行拉到超长：
+   - 短报告场景（建议 600~2500 字）：如日报速览、周报摘要、高层简报、会议纪要提炼、单页汇总、突发事件快报；
+   - 常规报告场景（建议 2000~12000 字）：如月度运营分析、专题复盘、市场动态综述、竞品观察、阶段性项目总结；
+   - 重报告场景（建议 15000~20000 字）：如年度深度研究、行业全景洞察、战略规划支撑报告、重大风险评估、多区域/多维度综合评估；
+   - 若输入条目很多且证据密度高，优先按“重报告”策略分配篇幅；
+   - 必须在 globalGuidelines 里说明本次场景与详略策略（例如“快报精简版”或“完整版深度分析”）；
 2. chapters 中每章需包含 targetWords/min/max、需要额外展开的 emphasis、sections 数组（为该章各小节/提纲分配字数与注意事项，可注明“允许在必要时超出10%补充案例”等）；
 3. rationale 必须解释该章篇幅配置理由，引用模板/素材中的关键信息；
 4. 章节编号遵循一级中文数字、二级阿拉伯数字，便于后续统一字号；
-5. 结果写成JSON并满足下述Schema，仅用于内部存储与章节生成，不直接输出给读者。
+5. 即使是短报告也必须保留“按章节生成”的结构，只是把每章 targetWords 下调并聚焦关键结论，避免冗长铺陈；
+6. 结果写成JSON并满足下述Schema，仅用于内部存储与章节生成，不直接输出给读者。
 
 <OUTPUT JSON SCHEMA>
 {json.dumps(word_budget_output_schema, ensure_ascii=False, indent=2)}
