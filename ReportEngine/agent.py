@@ -826,6 +826,7 @@ class ReportAgent:
         template_name: str = "",
         query: str = "",
         save_package: bool = True,
+        include_document_ir: bool = False,
     ) -> Dict[str, Any]:
         """
         生成“模板设计阶段”可复用数据包（基于虚拟数据）。
@@ -840,9 +841,11 @@ class ReportAgent:
             template_name: 模板名称，未提供时自动从模板正文提取标题。
             query: 可选主题词，用于模拟场景补充。
             save_package: 是否落盘 design_package 及其 artifacts。
+            include_document_ir: 是否基于 mock_inputs 继续生成完整 document_ir（默认False）。
 
         返回:
             dict: 设计包元数据 + 三类可复用产物（template_overview/layout/word_plan）。
+                  当 include_document_ir=True 时，额外返回 document_ir。
         """
         if not template_markdown or not template_markdown.strip():
             raise ValueError("模板内容为空，无法生成设计包")
@@ -908,6 +911,66 @@ class ReportAgent:
             "mock_inputs": mock_inputs,
         }
 
+        if include_document_ir:
+            chapter_targets = {
+                entry.get("chapterId"): entry
+                for entry in word_plan.get("chapters", [])
+                if isinstance(entry, dict) and entry.get("chapterId")
+            }
+            shared_context = self._build_chapter_context(
+                layout_design,
+                chapter_targets,
+                word_plan,
+                template_overview,
+                mock_dataset,
+            )
+            manifest_meta = {
+                "title": layout_design.get("title") or resolved_template_name,
+                "subtitle": layout_design.get("subtitle"),
+                "tagline": layout_design.get("tagline"),
+                "generatedAt": datetime.utcnow().isoformat() + "Z",
+                "sourceQuery": design_query,
+                "templateOverview": template_overview,
+                "toc": {
+                    "title": layout_design.get("tocTitle") or "目录",
+                    "entries": [section.to_toc_entry() for section in sections],
+                },
+                "hero": layout_design.get("hero"),
+                "layoutNotes": layout_design.get("layoutNotes"),
+                "wordPlan": {
+                    "totalWords": word_plan.get("totalWords"),
+                    "globalGuidelines": word_plan.get("globalGuidelines"),
+                    "chapters": word_plan.get("chapters"),
+                },
+            }
+            if layout_design.get("themeTokens"):
+                manifest_meta["themeTokens"] = layout_design["themeTokens"]
+            if layout_design.get("tocPlan"):
+                manifest_meta["toc"]["customEntries"] = layout_design["tocPlan"]
+
+            design_report_id = f"{package_id}-mock"
+            run_dir = self.chapter_storage.start_session(design_report_id, manifest_meta)
+            self._persist_planning_artifacts(
+                run_dir,
+                layout_design,
+                word_plan,
+                template_overview,
+            )
+
+            chapters = []
+            for section in sections:
+                chapter_payload = self.chapter_generation_node.run(
+                    section=section,
+                    context=shared_context,
+                    run_dir=run_dir,
+                    stream_handler=None,
+                )
+                chapters.append(chapter_payload)
+            package["document_ir"] = self.document_composer.build_document(
+                chapters,
+                manifest_meta,
+            )
+
         if save_package:
             package_dir = Path(self.config.OUTPUT_DIR) / "design_packages" / package_id
             package_dir.mkdir(parents=True, exist_ok=True)
@@ -918,6 +981,8 @@ class ReportAgent:
                 "mock_inputs.json": mock_inputs,
                 "design_package.json": package,
             }
+            if include_document_ir and isinstance(package.get("document_ir"), dict):
+                artifacts["document_ir.json"] = package["document_ir"]
             for filename, payload in artifacts.items():
                 target = package_dir / filename
                 target.write_text(

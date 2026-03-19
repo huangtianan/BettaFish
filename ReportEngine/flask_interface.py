@@ -1078,6 +1078,7 @@ def build_design_package():
         - template_filename: 从模板目录加载某个.md文件（当未提供template_content时）
         - query: 可选主题词
         - save_package: 是否落盘设计包（默认True）
+        - include_document_ir: 是否在设计阶段基于mock_inputs生成完整document_ir（默认False）
     """
     try:
         if not report_agent:
@@ -1092,6 +1093,7 @@ def build_design_package():
         template_filename = (data.get("template_filename") or "").strip()
         query = (data.get("query") or "").strip()
         save_package = data.get("save_package", True)
+        include_document_ir = bool(data.get("include_document_ir", False))
 
         if not template_content and template_filename:
             template_dir = settings.TEMPLATE_DIR
@@ -1117,6 +1119,7 @@ def build_design_package():
             template_name=template_name,
             query=query,
             save_package=bool(save_package),
+            include_document_ir=include_document_ir,
         )
 
         return jsonify({
