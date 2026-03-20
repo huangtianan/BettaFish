@@ -983,8 +983,9 @@ class ReportAgent:
                 )
                 chapters.append(chapter_payload)
             package["document_ir"] = self.document_composer.build_document(
-                chapters,
+                design_report_id,
                 manifest_meta,
+                chapters,
             )
 
         if save_package:
