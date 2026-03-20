@@ -940,7 +940,16 @@ class ReportAgent:
                 "templateOverview": template_overview,
                 "toc": {
                     "title": layout_design.get("tocTitle") or "目录",
-                    "entries": [section.to_toc_entry() for section in sections],
+                    "entries": [
+                        {
+                            "chapterId": section.chapter_id,
+                            "title": section.title,
+                            "anchor": section.slug,
+                            "order": section.order,
+                            "depth": section.depth,
+                        }
+                        for section in sections
+                    ],
                 },
                 "hero": layout_design.get("hero"),
                 "layoutNotes": layout_design.get("layoutNotes"),
