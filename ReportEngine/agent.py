@@ -922,12 +922,14 @@ class ReportAgent:
                 for entry in word_plan.get("chapters", [])
                 if isinstance(entry, dict) and entry.get("chapterId")
             }
-            shared_context = self._build_chapter_context(
-                layout_design,
-                chapter_targets,
-                word_plan,
-                template_overview,
-                mock_dataset,
+            shared_context = self._build_generation_context(
+                query=design_query,
+                dataset=mock_dataset,
+                template_result={"template_name": resolved_template_name},
+                layout_design=layout_design,
+                chapter_directives=chapter_targets,
+                word_plan=word_plan,
+                template_overview=template_overview,
             )
             manifest_meta = {
                 "title": layout_design.get("title") or resolved_template_name,
