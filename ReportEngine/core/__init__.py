@@ -8,10 +8,12 @@ Report Engine核心工具集合。
 from .template_parser import TemplateSection, parse_template_sections
 from .chapter_storage import ChapterStorage
 from .stitcher import DocumentComposer
+from .mock_data_builder import build_mock_inputs_for_template
 
 __all__ = [
     "TemplateSection",
     "parse_template_sections",
     "ChapterStorage",
     "DocumentComposer",
+    "build_mock_inputs_for_template",
 ]
