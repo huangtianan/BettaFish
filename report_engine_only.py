@@ -754,6 +754,7 @@ def generate_design_package_cli(
         template_name=resolved_template_name,
         query=(query or "").strip(),
         save_package=bool(save_package),
+        include_document_ir=True,
     )
 
 

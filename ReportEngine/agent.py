@@ -1185,10 +1185,13 @@ class ReportAgent:
             by_type[bucket].append(item)
             if item["query"]:
                 query_index.setdefault(item["query"], []).append(item["id"])
-            content_preview = item["content"] if item["outputType"] != "plotly" else item["url"]
-            context_lines.append(
-                f"[{item['id']}] ({item['outputType']}) query={item['query']}\n{content_preview}"
-            )
+            if item["outputType"] == "table":
+                context_lines.append(f"- 表格 | {item['query']}({item['url']}) | 查询结果：{item['content']}")
+            elif item["outputType"] == "plotly":
+                context_lines.append(f"- 图表 | {item['query']}({item['url']}) | 查询结果：图形请直接使用url")
+            elif item["outputType"] == "summary":
+                context_lines.append(f"- 总结：{item['content']}")
+
 
         return {
             "items": normalized_items,
