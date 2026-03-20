@@ -535,6 +535,42 @@ def parse_arguments():
         help='显示详细日志信息'
     )
 
+    # === 设计包生成（对应 flask_interface.build_design_package） ===
+    parser.add_argument(
+        '--design-package',
+        action='store_true',
+        default=True,
+        help='仅生成模板设计阶段数据包（template_overview/layout/word_plan），不生成整本报告',
+    )
+    parser.add_argument(
+        '--template-content-file',
+        type=str,
+        default="",
+        help='模板Markdown文件路径（优先级最高，直接读取其内容）',
+    )
+    parser.add_argument(
+        '--template-filename',
+        type=str,
+        default="设计包测试-经营月报模板.md",
+        help='从 ReportEngine 模板目录读取的 .md 文件名（当未提供 --template-content-file 时使用）',
+    )
+    parser.add_argument(
+        '--template-name',
+        type=str,
+        default="设计包测试-经营月报模板",
+        help='模板名称（可选；未提供时会从文件名或模板标题推断）',
+    )
+    parser.add_argument(
+        '--save-package',
+        action='store_true',
+        help='落盘 design_package 到 final_reports/design_packages（默认开启）',
+    )
+    parser.add_argument(
+        '--no-save-package',
+        action='store_true',
+        help='不落盘 design_package，仅输出到控制台',
+    )
+
     return parser.parse_args()
 
 
@@ -551,6 +587,22 @@ def main():
     logger.info("║" + " " * 20 + "Report Engine 命令行版本" + " " * 24 + "║")
     logger.info("╚" + "═" * 68 + "╝")
     logger.info("\n")
+
+    # 设计包模式：直接生成 design package 并退出
+    if args.design_package:
+        pkg = generate_design_package_cli(
+            template_content_file=args.template_content_file or None,
+            template_filename=args.template_filename or "设计包测试-经营月报模板.md",
+            template_name=args.template_name or "设计包测试-经营月报模板",
+            query=args.query or "",
+            save_package=(False if args.no_save_package else True),
+        )
+        logger.success("✓ 设计包生成完成！")
+        if isinstance(pkg, dict):
+            package_dir = pkg.get("packageDir")
+            if package_dir:
+                logger.info(f"design_package 目录: {package_dir}")
+        return
 
     # 步骤 1: 检查依赖
     pdf_available, _ = check_dependencies()
@@ -645,6 +697,167 @@ def main():
         logger.info("Markdown 文件: 已跳过")
     logger.info("=" * 70)
     logger.info("\n程序结束")
+
+
+def generate_design_package_cli(
+    *,
+    template_content_file: Optional[str],
+    template_filename: Optional[str],
+    template_name: str,
+    query: str,
+    save_package: bool,
+) -> Dict[str, Any]:
+    """
+    将 flask_interface.build_design_package 的核心逻辑移植到 CLI。
+    """
+    from BettaFish.ReportEngine.utils.config import settings
+    from BettaFish.ReportEngine import ReportAgent
+
+    # 初始化 ReportAgent（与报告生成保持一致：注入 llm_api）
+    llm_param = _extract_llm_param_from_test_conversing_v2()
+    llm_api = _create_llm_api_from_llm_param(
+        llm_param=llm_param,
+        python_logger=logging.getLogger("report_engine_only"),
+    )
+    code_executor = _create_code_executor_for_cli()
+    # 需要调用 plotly_visualization 插件，必须加载插件
+    try:
+        code_executor.start()
+    except Exception:
+        pass
+    report_agent = ReportAgent(config=None, llm_api=llm_api, telemetry_logger=None, code_executor=code_executor)
+
+    content = ""
+    resolved_template_name = (template_name or "").strip()
+    filename = (template_filename or "").strip()
+
+    if template_content_file:
+        content = Path(template_content_file).read_text(encoding="utf-8").strip()
+        if not resolved_template_name:
+            resolved_template_name = Path(template_content_file).stem
+    elif filename:
+        template_dir = settings.TEMPLATE_DIR
+        candidate_path = os.path.join(template_dir, filename)
+        if not os.path.exists(candidate_path):
+            raise FileNotFoundError(f"模板文件不存在: {candidate_path}")
+        content = Path(candidate_path).read_text(encoding="utf-8").strip()
+        if not resolved_template_name:
+            resolved_template_name = filename.replace(".md", "")
+    else:
+        raise ValueError("缺少 --template-content-file 或 --template-filename")
+
+    if not content:
+        raise ValueError("模板内容为空")
+
+    return report_agent.generate_design_package(
+        template_markdown=content,
+        template_name=resolved_template_name,
+        query=(query or "").strip(),
+        save_package=bool(save_package),
+    )
+
+
+def _create_code_executor_for_cli():
+    """
+    在 CLI 中初始化 CodeExecutor：
+    - 不走 NextAgentApp，避免触发全量 LLM/Embedding 初始化
+    - 复用 Session 同款构造方式：session_metadata + injector.create_object(CodeExecutor, ...)
+    """
+    import tempfile
+    from uuid import uuid4
+    from nextagent.config.config_mgt import AppConfigSource
+    from nextagent.ces import code_execution_service_factory
+    from dataclasses import dataclass
+    @dataclass
+    class UploadResult:
+        success: bool
+        url: Optional[str] = None
+        error_message: Optional[str] = None
+
+    from nextagent.code_interpreter.code_executor import CodeExecutor, SessionMetadata as ExecutorSessionMetadata
+
+    class _SinglePluginRegistry:
+        """只提供一个插件：plotly_visualization，避免依赖全量插件目录。"""
+
+        def __init__(self, yaml_path) -> None:
+            self._yaml_path = str(yaml_path)
+
+        def get_list(self):
+            # 延迟导入，避免不必要的依赖链
+            from nextagent.memory.plugin import PluginEntry
+
+            entry = PluginEntry.from_yaml_file(self._yaml_path)
+            return [entry] if entry is not None else []
+
+    class _DummyTracing:
+        @staticmethod
+        def set_span_attribute(*args, **kwargs):
+            return None
+
+        @staticmethod
+        def set_span_status(*args, **kwargs):
+            return None
+
+    class _LocalDataProcessor:
+        """无 minio 依赖的本地 mock 上传器，返回 file:// url。"""
+
+        def __init__(self, base_dir: str) -> None:
+            self.base_dir = base_dir
+            os.makedirs(self.base_dir, exist_ok=True)
+
+        def process_table_data(self, df, session_id: str, query_name: str = "data"):
+            filename = f"table_{session_id}_{uuid4().hex[:8]}.json"
+            path = os.path.join(self.base_dir, filename)
+            df.to_json(path, orient="records", force_ascii=False)
+            return UploadResult(success=True, url=Path(path).as_uri(), error_message=None)
+
+        def upload_json_data(self, json_data: str, object_name: str):
+            safe_name = object_name.replace("/", "_")
+            filename = f"{safe_name}_{uuid4().hex[:8]}.json"
+            path = os.path.join(self.base_dir, filename)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json_data)
+            return UploadResult(success=True, url=Path(path).as_uri(), error_message=None)
+
+    project_path = _REPO_ROOT / "project"
+    session_id = f"report_engine_only_{uuid4().hex[:8]}"
+    workspace = os.path.join(tempfile.gettempdir(), "nextagent", "sessions", session_id)
+    execution_cwd = os.path.join(workspace, "cwd")
+    os.makedirs(execution_cwd, exist_ok=True)
+
+    config_src = AppConfigSource(
+        config_file_path=str(project_path / "nextagent_config.json"),
+        config={"use_local_uri": True},
+        app_base_path=str(project_path),
+    )
+
+    metadata = ExecutorSessionMetadata(
+        session_id=session_id,
+        workspace=workspace,
+        execution_cwd=execution_cwd,
+    )
+    env_dir = os.path.join(str(project_path), "env")
+    base_url = os.environ.get("JUPYTER_BASE_URL", "http://localhost:8085")
+    manager = code_execution_service_factory(
+        env_dir=env_dir,
+        kernel_mode="remote",
+        custom_image=None,
+        base_url=base_url,
+    )
+    logger = logging.getLogger("report_engine_only.code_executor")
+    tracing = _DummyTracing()
+    data_processor = _LocalDataProcessor(base_dir=os.path.join(workspace, "mock_uploads"))
+    plugin_yaml = _REPO_ROOT / "project" / "plugins" / "plotly_visualization.yaml"
+    plugins = _SinglePluginRegistry(plugin_yaml)
+    return CodeExecutor(
+        session_metadata=metadata,
+        config=config_src,
+        exec_mgr=manager,
+        logger=logger,
+        plugin_registry=plugins,
+        tracing=tracing,
+        data_processor=data_processor,
+    )
 
 
 if __name__ == "__main__":
